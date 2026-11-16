@@ -28,5 +28,10 @@ object Prefs {
     val high get() = get("quality") != "low"
     val skipOffline get() = get("skipOffline") == "true"
 
-    fun json(): JSONObject = JSONObject().apply { for (k in defaults.keys) put(k, get(k)) }
+    // Dikkat: apply{} içinde get() JSONObject.get'e gider (boşken hata atar). Açıkça Prefs.get.
+    fun json(): JSONObject {
+        val o = JSONObject()
+        for (k in defaults.keys) o.put(k, this.get(k))
+        return o
+    }
 }

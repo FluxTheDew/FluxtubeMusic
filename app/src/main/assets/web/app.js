@@ -48,6 +48,10 @@
     });
   }
   const J = (s, d) => { try { return JSON.parse(s); } catch (e) { return d; } };
+  /** Köprü çağrısı hata verirse arayüz çökmesin: hatayı kaydet, varsayılanı dön. */
+  const safe = (fn, d) => {
+    try { return fn(); } catch (e) { showErr((e && e.message) || e); return d; }
+  };
 
   // --- yardımcılar ------------------------------------------------------------------
 
@@ -90,7 +94,7 @@
   let queue = [];
   let qrev = -1, lrev = -1, drev = -1, lastIndex = -2;
   let lib = [];
-  let prefs = J(FM.prefs(), {});
+  let prefs = J(safe(() => FM.prefs(), "{}"), {});
   let tab = "home";
   let playerOpen = false;
   let settingsOpen = false;
@@ -1037,7 +1041,7 @@
 
   // --- HESAP ------------------------------------------------------------------------------------------
 
-  let acct = J(FM.account(), { loggedIn: false });
+  let acct = J(safe(() => FM.account(), "{}"), { loggedIn: false });
   let arev = -1;
   let syncBusy = false;
 
