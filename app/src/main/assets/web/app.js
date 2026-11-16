@@ -13,6 +13,18 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const FM = window.FM || mockBridge();
 
+  // --- JS hatası: ekranda kırmızı şerit + OLAYLAR'a kayıt (telefonda hata ayıklamak için) ---------
+  function showErr(msg) {
+    try { if (FM.jsError) FM.jsError(String(msg)); } catch (e) { /* yok */ }
+    const el = document.getElementById("jserr");
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = "HATA: " + msg + "\n(kapatmak için dokun · AYAR → OLAYLAR'da da var)";
+  }
+  window.addEventListener("error", (e) => showErr((e.message || "hata") + " @" + (e.lineno || "?") + ":" + (e.colno || "?")));
+  window.addEventListener("unhandledrejection", (e) => showErr("promise: " + ((e.reason && e.reason.message) || e.reason)));
+  document.getElementById("jserr").addEventListener("click", (e) => { e.currentTarget.hidden = true; });
+
   // --- Kotlin'e uzun işler: FM.x(req, …) → FMcb(req, sonuç) -------------------------
 
   let reqN = 0;
@@ -76,33 +88,80 @@
   let qrev = -1, lrev = -1, drev = -1, lastIndex = -2;
   let lib = [];
   let prefs = J(FM.prefs(), {});
-  let tab = "now";
+  let tab = "home";
+  let playerOpen = false;
+  let settingsOpen = false;
 
   try { $("#ver").textContent = "v" + FM.version(); } catch (e) { /* yok */ }
 
   // --- sekmeler ----------------------------------------------------------------------
 
   function go(t) {
+    if (t === tab) {
+      // Aynı sekmeye tekrar dokun: başa kaydır.
+      const pg = $(".view.is-active .page");
+      if (pg) pg.scrollTo({ top: 0, behavior: "smooth" });
+    }
     tab = t;
-    $$(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+    $$(".bnav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
     $$(".view").forEach((v) => v.classList.toggle("is-active", v.dataset.view === t));
     if (t === "lib") renderLib();
-    if (t === "settings") { renderPrefs(); renderDownloads(); renderStats(); pollLogs(); }
     if (t === "search") renderSearchState();
+    if (t === "home") renderHome();
     renderMini();
   }
-  $$(".tabs button").forEach((b) => b.addEventListener("click", () => go(b.dataset.tab)));
+  $$(".bnav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.tab)));
   document.addEventListener("click", (e) => {
     const g = e.target.closest("[data-go]");
-    if (g) go(g.dataset.go);
+    if (g) { closePlayer(); closeSettings(); go(g.dataset.go); }
   });
+
+  // --- tam ekran: çalar ve ayarlar -------------------------------------------------------
+
+  function openPlayer() {
+    playerOpen = true;
+    $("#player").hidden = false;
+    renderMini();
+    const cur = $("#queue .row.is-cur");
+    if (cur) setTimeout(() => cur.scrollIntoView({ block: "center" }), 30);
+  }
+  function closePlayer() {
+    if (!playerOpen) return;
+    playerOpen = false;
+    $("#player").hidden = true;
+    renderMini();
+  }
+  function openSettings() {
+    settingsOpen = true;
+    $("#settings").hidden = false;
+    renderPrefs(); renderDownloads(); renderStats(); renderAccount(); pollLogs();
+  }
+  function closeSettings() {
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    $("#settings").hidden = true;
+  }
+  $("#player-close").addEventListener("click", closePlayer);
+  $("#settings-close").addEventListener("click", closeSettings);
+  $("#gear").addEventListener("click", openSettings);
+  $("#player-more").addEventListener("click", () => menu({
+    title: "SIRA",
+    sub: queue.length + " şarkı",
+    items: [
+      { g: "⤮", t: "Sıradakileri karıştır", fn: () => $("#c-shuf").click() },
+      { g: "≡", t: "Sırayı liste olarak kaydet", fn: () => $("#q-save").click() },
+      { g: "✕", t: "Sırayı temizle", danger: true, fn: () => $("#q-clear").click() },
+    ],
+  }));
 
   // Android geri tuşu: önce açık pencere, sonra ana sekme; en son uygulama arka plana.
   window.onBack = () => {
     if ($(".modal")) { $(".modal").remove(); return true; }
     if ($(".scrim")) { closeMenu(); return true; }
     if (!$("#sheet").hidden) { closeSheet(); return true; }
-    if (tab !== "now") { go("now"); return true; }
+    if (playerOpen) { closePlayer(); return true; }
+    if (settingsOpen) { closeSettings(); return true; }
+    if (tab !== "home") { go("home"); return true; }
     return false;
   };
 
@@ -150,17 +209,20 @@
   }
 
   /** Bir listeye satır davranışı: dokun / ＋ / ⋯ / uzun bas. */
-  function bindSongList(el, getItems, getCtx) {
+  function bindSongList(el, getItems, getCtx, sel, attr) {
+    sel = sel || ".row";
+    attr = attr || "k";
     let lp = null, lpFired = false;
     el.addEventListener("pointerdown", (e) => {
-      const row = e.target.closest(".row");
-      if (!row || e.target.closest(".handle, button")) return;
+      const row = e.target.closest(sel);
+      if (!row || e.target.closest(".handle, [data-act]")) return;
       lpFired = false;
       const x = e.clientX, y = e.clientY;
       lp = { x, y, t: setTimeout(() => {
         lpFired = true;
-        const it = getItems()[Number(row.dataset.k)];
-        if (it && it.kind !== "list") openSongMenu(it, Object.assign({ k: Number(row.dataset.k), items: getItems() }, getCtx ? getCtx() : {}));
+        const it = getItems()[Number(row.dataset[attr])];
+        if (it && it.kind === "pl") { openListMenu(it.id); return; }
+        if (it && it.kind !== "list") openSongMenu(it, Object.assign({ k: Number(row.dataset[attr]), items: getItems() }, getCtx ? getCtx() : {}));
       }, 520) };
     });
     const cancel = (e) => {
@@ -174,14 +236,15 @@
     el.addEventListener("contextmenu", (e) => e.preventDefault());
     el.addEventListener("click", (e) => {
       if (lpFired) { lpFired = false; return; }
-      const row = e.target.closest(".row");
+      const row = e.target.closest(sel);
       if (!row || e.target.closest(".handle")) return;
-      const k = Number(row.dataset.k);
+      const k = Number(row.dataset[attr]);
       const items = getItems();
       const it = items[k];
       if (!it) return;
       const ctx = Object.assign({ k, items }, getCtx ? getCtx() : {});
-      if (it.kind === "list") { openYtList(it.url, it.title); return; }
+      if (it.kind === "list") { openYtList(it.list || it.url, it.title); return; }
+      if (it.kind === "pl") { openPlaylist(it.id); return; }
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "add") enqueue([it], "end");
       else if (act === "more") openSongMenu(it, ctx);
@@ -414,7 +477,7 @@
   function renderMini() {
     const m = $("#mini");
     const c = S.cur;
-    m.hidden = tab === "now" || !c;
+    m.hidden = playerOpen || !c;
     if (m.hidden) return;
     if (c.id !== miniId) {
       miniId = c.id;
@@ -431,7 +494,134 @@
   $("#mini").addEventListener("click", (e) => {
     if (e.target.closest("#mini-play")) { FM.toggle(); setTimeout(poll, 100); return; }
     if (e.target.closest("#mini-next")) { FM.next(); setTimeout(poll, 100); return; }
-    go("now");
+    openPlayer();
+  });
+
+  // --- ANA SAYFA -------------------------------------------------------------------------------------
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* yok */ } },
+  };
+  let ytHome = J(store.get("fm.home"), null); // {at, acct, data:[{title, strap, rows, items}]}
+  let homeBusy = false;
+  let homeItems = [];
+
+  /** YT Music ana sayfası (girişliyse sana özel). 20 dk'da bir tazelenir. */
+  function loadHome(force) {
+    if (!S.online || homeBusy) return;
+    const fresh = ytHome && Date.now() - ytHome.at < 20 * 60e3 && ytHome.acct === !!acct.loggedIn;
+    if (!force && fresh) return;
+    homeBusy = true;
+    if (!ytHome || force) spinner($("#home-spin"), true);
+    call("home").then((d) => {
+      ytHome = { at: Date.now(), acct: !!acct.loggedIn, data: d || [] };
+      store.set("fm.home", JSON.stringify(ytHome));
+      if (tab === "home") renderHome();
+    }).catch((e) => {
+      if (force) toast("ana sayfa alınamadı: " + e.message, true);
+    }).finally(() => {
+      homeBusy = false;
+      spinner($("#home-spin"), false);
+    });
+  }
+
+  function itemArt(it) {
+    let src = "";
+    if (it.kind === "pl") src = it.cover ? "https://fm.art/" + encodeURIComponent(it.cover) : "";
+    else if (it.kind === "list") src = it.thumb || "";
+    else src = it.known ? "https://fm.art/" + encodeURIComponent(it.id) : (it.thumb || "");
+    return '<div class="art">' + (src ? '<img loading="lazy" src="' + esc(src) + '" onerror="this.remove()" alt="">' : "") + "</div>";
+  }
+
+  function renderHome() {
+    const el = $("#home");
+    const byId = new Map(lib.map((x) => [x.id, x]));
+    const known = (x) => (byId.has(x.id) ? Object.assign({}, x, byId.get(x.id), { kind: "song", known: true }) : x);
+    const now = Date.now();
+    const played = lib.filter((x) => x.playedAt > 0);
+    const recent = played.slice().sort((a, b) => b.playedAt - a.playedAt).slice(0, 20);
+    const top = played.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0) || b.playedAt - a.playedAt).slice(0, 27);
+    const forgotten = lib.filter((x) => (x.liked || (x.plays || 0) >= 3) && (!x.playedAt || now - x.playedAt > 14 * 864e5))
+      .sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, 20);
+    const fresh = lib.slice().sort((a, b) => b.addedAt - a.addedAt).slice(0, 20);
+    const pls = J(FM.playlists(), []);
+    const yt = (S.online && ytHome && ytHome.data) || [];
+    const mine = (arr) => arr.map((x) => Object.assign({}, x, { kind: "song", known: true }));
+
+    const secs = [];
+    if (!yt.length && top.length) secs.push({ title: "Hızlı seçim", strap: "en çok dinlediklerin", style: "grid", items: mine(top), src: "TELEFON" });
+    yt.forEach((sec, i) => secs.push({
+      title: sec.title, strap: sec.strap,
+      style: sec.rows ? "rows" : (i === 0 && sec.items.length >= 6 ? "grid" : "cards"),
+      items: sec.items.map((x) => (x.kind === "song" ? known(x) : x)), src: "YT",
+    }));
+    if (recent.length) secs.push({ title: "Son dinlenenler", strap: "bu telefonda", style: "cards", items: mine(recent), src: "TELEFON" });
+    if (forgotten.length) secs.push({ title: "Unutulan favoriler", strap: "bir süredir çalmadın", style: "cards", items: mine(forgotten), src: "TELEFON" });
+    if (pls.length) secs.push({
+      title: "Listelerin", style: "cards", src: "TELEFON",
+      items: pls.map((p) => ({ kind: "pl", id: p.id, title: p.name, artist: p.count + " şarkı" + (p.yt ? " · YT" : ""), cover: p.cover })),
+    });
+    if (yt.length && top.length) secs.push({ title: "Çok dinlediklerin", style: "grid", items: mine(top), src: "TELEFON" });
+    if (fresh.length) secs.push({ title: "Yeni eklenenler", style: "cards", items: mine(fresh), src: "TELEFON" });
+
+    // Yeniden çizerken kaydırma yerleri kaybolmasın.
+    const keep = {};
+    $$(".hscroll", el).forEach((h) => { keep[h.dataset.sec] = h.scrollLeft; });
+
+    homeItems = [];
+    if (!secs.length) {
+      el.innerHTML = '<div class="panel home-empty"><div class="panel-head"><h2>HOŞ GELDİN</h2></div>' +
+        '<p class="panel-desc">Henüz dinlediğin bir şey yok. YouTube Music hesabınla giriş yaparsan sana özel ana sayfa ve listelerin gelir; ' +
+        "ya da ARA'dan şarkı bul, telefondaki müzikleri tara.</p>" +
+        '<div class="row-btns"><button class="btn btn-solid" type="button" id="he-login">◉ GİRİŞ YAP</button>' +
+        '<button class="btn" type="button" data-go="search">⌕ ARA</button>' +
+        '<button class="btn btn-ghost" type="button" id="he-scan">◆ TELEFONU TARA</button></div></div>';
+      const lg = $("#he-login");
+      if (acct.loggedIn) lg.remove(); else lg.addEventListener("click", () => $("#acct-login").click());
+      $("#he-scan").addEventListener("click", () => $("#scan").click());
+      return;
+    }
+    const cur = S.cur && S.cur.id;
+    el.innerHTML = secs.map((sec, si) => {
+      const key = sec.src + ":" + sec.title;
+      const cells = sec.items.map((it) => {
+        const h = homeItems.push(it) - 1;
+        const nope = it.kind === "song" && !S.online && !it.dl ? " is-nope" : "";
+        const isCur = it.kind === "song" && it.id === cur ? " is-cur" : "";
+        if (sec.style === "rows") return songRow(it, h, { remote: !it.known }).replace('data-k="', 'data-h="');
+        if (sec.style === "grid") {
+          return '<button type="button" class="tile' + nope + isCur + '" data-h="' + h + '">' + itemArt(it) +
+            '<span class="lbl">' + esc(it.title) + "</span></button>";
+        }
+        return '<button type="button" class="card' + (it.kind !== "song" ? " is-list" : "") + nope + isCur + '" data-h="' + h + '">' + itemArt(it) +
+          '<div class="nm">' + esc(it.title) + '</div><div class="ar">' + esc(it.artist || "") + "</div></button>";
+      }).join("");
+      return '<section class="hs"><div class="hs-head"><div class="tt">' + (sec.strap ? '<div class="st">' + esc(sec.strap) + "</div>" : "") +
+        "<h2>" + esc(sec.title) + '</h2></div><span class="src">' + sec.src + "</span></div>" +
+        '<div class="hscroll hs-' + sec.style + '" data-sec="' + esc(key) + '">' + cells + "</div></section>";
+    }).join("");
+    $$(".hscroll", el).forEach((h) => { if (keep[h.dataset.sec]) h.scrollLeft = keep[h.dataset.sec]; });
+  }
+  bindSongList($("#home"), () => homeItems, () => ({ kind: "home" }), "[data-h]", "h");
+
+  $("#chips").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-chip]");
+    if (!b) return;
+    const c = b.dataset.chip;
+    if (c === "shuffle") {
+      const pool = S.online ? lib : lib.filter((x) => x.dl);
+      if (pool.length) enqueue(pool, "shuffle"); else toast("kitaplık boş — ARA'dan şarkı ekle");
+    } else if (c === "dl" || c === "liked") {
+      libMode = c; libLimit = LIB_LIMIT; go("lib");
+    } else if (c === "local") {
+      const loc = lib.filter((x) => x.local);
+      if (loc.length) enqueue(loc, "shuffle"); else toast("yerel şarkı yok — ⚙ → TELEFONU TARA");
+    } else if (c === "refresh") {
+      if (!S.online) { toast("internet yok", true); return; }
+      loadHome(true);
+      renderHome();
+    }
   });
 
   // --- KİTAPLIK ------------------------------------------------------------------------------------
@@ -563,18 +753,21 @@
       renderSheet();
     }
   }
-  function openYtList(url, name) {
+  /** YouTube listesi / albüm / karışık: kimlik (PL…, OLAK…, RD…) ya da adres. */
+  function openYtList(ref, name) {
     if (!S.online) { toast("internet yok", true); return; }
-    openSheet({ kind: "yt", url, name, loading: true, songs: [] });
+    const m = /[?&]list=([\w-]+)/.exec(ref || "");
+    const id = m ? m[1] : (/^[\w-]+$/.test(ref || "") ? ref : null);
+    openSheet({ kind: "yt", url: ref, name: name || "LİSTE", loading: true, songs: [] });
     spinner($("#sheet-spin"), true);
-    call("openList", url).then((d) => {
-      if (!sh || sh.url !== url) return;
+    (id ? call("openYt", id) : call("openList", ref)).then((d) => {
+      if (!sh || sh.url !== ref) return;
       spinner($("#sheet-spin"), false);
-      sh.loading = false; sh.name = d.name || name; sh.songs = d.songs || [];
+      sh.loading = false; sh.name = name || d.name; sh.songs = d.songs || [];
       renderSheet();
     }).catch((e) => {
       spinner($("#sheet-spin"), false);
-      if (sh && sh.url === url) { sh.loading = false; renderSheet(); }
+      if (sh && sh.url === ref) { sh.loading = false; renderSheet(); }
       toast("liste açılamadı: " + e.message, true);
     });
   }
@@ -850,6 +1043,13 @@
     $("#acct-in").hidden = !acct.loggedIn;
     $("#acct-badge").textContent = acct.loggedIn ? "BAĞLI" : "GİRİŞ YOK";
     $("#acct-badge").className = "badge" + (acct.loggedIn ? " red" : "");
+    $("#me").classList.toggle("is-in", !!acct.loggedIn);
+    const ma = $("#me-art");
+    const mp = (acct.loggedIn && acct.photo) || "";
+    if (ma.dataset.src !== mp) {
+      ma.dataset.src = mp;
+      ma.innerHTML = mp ? '<img src="' + esc(mp) + '" onerror="this.remove()" alt="">' : "";
+    }
     if (!acct.loggedIn) return;
     $("#acct-name").textContent = acct.name || "YouTube hesabı";
     const when = acct.syncedAt ? "son eşitleme " + new Date(acct.syncedAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "henüz eşitlenmedi";
@@ -892,6 +1092,30 @@
     toast("çıkış yapıldı");
   }));
   $("#acct-sync").addEventListener("click", syncAccount);
+  $("#me").addEventListener("click", () => {
+    if (acct.loggedIn) {
+      menu({
+        title: acct.name || "YouTube hesabı",
+        sub: acct.handle || "",
+        song: acct.photo ? { thumb: acct.photo } : null, remote: true,
+        items: [
+          { g: "↻", t: "Kitaplığı eşitle", sub: "YT listeleri + beğenilenler", fn: syncAccount },
+          { g: "⌂", t: "Ana sayfayı yenile", fn: () => loadHome(true) },
+          { g: "⚙", t: "Ayarlar", fn: openSettings },
+          { g: "⏻", t: "Çıkış yap", danger: true, fn: () => $("#acct-logout").click() },
+        ],
+      });
+    } else {
+      menu({
+        title: "Giriş yapılmadı",
+        sub: "YouTube Music hesabını bağla: listelerin ve sana özel ana sayfa gelsin",
+        items: [
+          { g: "◉", t: "YouTube ile giriş yap", fn: () => $("#acct-login").click() },
+          { g: "⚙", t: "Ayarlar", fn: openSettings },
+        ],
+      });
+    }
+  });
   $("#pl-sync").addEventListener("click", syncAccount);
 
   // --- AYAR ------------------------------------------------------------------------------------------
@@ -974,7 +1198,7 @@
       error: cur + " · <span class=\"red\">" + esc(u.error || "hata") + "</span>",
     }[u.phase] || cur;
     // Sekmede küçük kırmızı nokta: yeni sürüm var.
-    const t = $(".tabs [data-tab=settings]");
+    const t = $("#gear");
     let dot = t.querySelector(".upd");
     if (u.phase === "available" && !dot) { dot = document.createElement("span"); dot.className = "upd"; t.appendChild(dot); }
     if (u.phase !== "available" && dot) dot.remove();
@@ -1014,13 +1238,16 @@
   let wasOnline = null;
   function renderConn() {
     const c = $("#conn");
+    c.hidden = !!S.online && !S.dlActive;
     c.className = "conn " + (S.online ? "is-ok" : "is-off");
-    $("span", c).textContent = (S.dlActive ? "↓" + S.dlActive + " · " : "") + (S.online ? "ÇEVRİMİÇİ" : "ÇEVRİMDIŞI");
+    $("span", c).textContent = S.online ? "↓" + S.dlActive : (S.dlActive ? "↓" + S.dlActive + " · " : "") + "ÇEVRİMDIŞI";
     if (wasOnline !== null && wasOnline !== S.online) {
       toast(S.online ? "internet geldi" : "çevrimdışı — indirilenler çalmaya devam eder");
       renderQueue();
       if (tab === "lib") renderLib();
       renderSearchState();
+      if (S.online) loadHome(false);
+      if (tab === "home") renderHome();
     }
     wasOnline = S.online;
   }
@@ -1050,8 +1277,8 @@
       acct = J(FM.account(), acct);
       renderAccount();
       if (tab === "lib") renderLib();
-      if (!was && acct.loggedIn) { toast("◉ giriş yapıldı — kitaplık eşitleniyor"); syncAccount(); }
-    } else if (tab === "settings" && acct.loggedIn) {
+      if (!was && acct.loggedIn) { toast("◉ giriş yapıldı — kitaplık eşitleniyor"); syncAccount(); loadHome(true); }
+    } else if (settingsOpen && acct.loggedIn) {
       renderAccount();
     }
     renderConn();
@@ -1059,21 +1286,25 @@
     renderMini();
     renderUpdate();
     if (libChanged) {
+      if (tab === "home") renderHome();
       if (tab === "lib") renderLib();
       if (sh) reloadSheet();
       if (tab === "search" && sResults.length) renderSearch();
-      if (tab === "settings") renderStats();
+      if (settingsOpen) renderStats();
     }
-    if (tab === "settings") {
+    if (settingsOpen) {
       if (s.drev !== drev || s.dlActive) { drev = s.drev; renderDownloads(); }
       if (ticks % 4 === 0) pollLogs();
     }
+    if (ticks % 20 === 0) loadHome(false);
     ticks++;
   }
 
   renderPrefs();
-  poll();
-  setInterval(poll, 500);
+  renderAccount();
+  try { poll(); } catch (e) { showErr(e.message + " (ilk yükleme)"); }
+  setInterval(() => { try { poll(); } catch (e) { showErr(e.message); } }, 500);
+  renderHome();
 
   // --- tarayıcıda geliştirme için sahte köprü ----------------------------------------------------------
 
@@ -1123,6 +1354,13 @@
       openList: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "albüm", songs: songs.slice(2, 8) } })), 600),
       scanLocal: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { count: 0 } })), 300),
       prefs: () => JSON.stringify({ quality: "high", autoDl: "wifi", tap: "now", skipOffline: "true", dlWifiOnly: "false" }),
+      home: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: [
+        { title: "Hızlı seçim", strap: "", rows: false, items: songs.slice(0, 9).map((x) => Object.assign({ kind: "song" }, x)) },
+        { title: "Unutulan favoriler", strap: "", rows: false, items: songs.slice(3, 9).map((x) => Object.assign({ kind: "song" }, x)) },
+        { title: "Karışıklar", strap: "senin için", rows: false, items: [{ kind: "list", list: "RDTMAK", title: "Mix 1", artist: "Barış Manço, Cem Karaca", thumb: "" }] },
+      ] })), 500),
+      openYt: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "Mix 1", songs: songs.slice(1, 6) } })), 500),
+      jsError: () => {},
       account: () => JSON.stringify({ loggedIn: true, name: "Flux", handle: "@fluxthedew", photo: "", syncedAt: Date.now() - 36e5 }),
       login: () => {}, logout: () => {},
       syncAccount: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { lists: 4, songs: 212 } })), 1500),

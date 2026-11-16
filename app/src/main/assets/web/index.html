@@ -9,21 +9,105 @@
 <body>
   <div class="app">
     <header class="topbar">
+      <button class="me" type="button" id="me" aria-label="profil"><span class="art" id="me-art"></span></button>
       <span class="brand">FLUX<b>::</b>MUSIC</span>
-      <span class="ver" id="ver"></span>
-      <span class="conn" id="conn"><i></i><span>—</span></span>
+      <span class="conn" id="conn" hidden><i></i><span></span></span>
+      <button class="gear" type="button" id="gear" aria-label="ayarlar">⚙</button>
     </header>
 
-    <nav class="tabs" role="tablist">
-      <button type="button" role="tab" data-tab="now" aria-selected="true"><span class="n">01</span>ÇALAN</button>
-      <button type="button" role="tab" data-tab="lib" aria-selected="false"><span class="n">02</span>KİTAPLIK</button>
-      <button type="button" role="tab" data-tab="search" aria-selected="false"><span class="n">03</span>ARA</button>
-      <button type="button" role="tab" data-tab="settings" aria-selected="false"><span class="n">04</span>AYAR</button>
-    </nav>
+    <!-- ANA SAYFA -->
+    <section class="view is-active" data-view="home">
+      <div class="page home-page" id="home-page">
+        <div class="chips-row" id="chips">
+          <button type="button" data-chip="shuffle">⤮ KARIŞIK</button>
+          <button type="button" data-chip="dl">↓ İNDİRİLENLER</button>
+          <button type="button" data-chip="liked">♥ BEĞENİLENLER</button>
+          <button type="button" data-chip="local">◆ YEREL</button>
+          <button type="button" data-chip="refresh">↻ YENİLE</button>
+        </div>
+        <div class="spinner" id="home-spin"></div>
+        <div id="home"></div>
+      </div>
+    </section>
 
-    <!-- ÇALAN + SIRA -->
-    <section class="view is-active" data-view="now">
-      <div class="page" id="now-page">
+    <!-- ARA -->
+    <section class="view" data-view="search">
+      <div class="page">
+        <form class="search" id="s-form" autocomplete="off">
+          <span class="ic" aria-hidden="true">&gt;</span>
+          <input id="s-q" type="search" placeholder="YouTube Music'te ara ya da link yapıştır" spellcheck="false" enterkeyhint="search" />
+          <button type="submit">ARA</button>
+        </form>
+        <div class="seg" id="s-filter">
+          <button type="button" data-f="songs" aria-pressed="true">ŞARKI</button>
+          <button type="button" data-f="videos" aria-pressed="false">VİDEO</button>
+          <button type="button" data-f="albums" aria-pressed="false">ALBÜM</button>
+          <button type="button" data-f="playlists" aria-pressed="false">LİSTE</button>
+        </div>
+        <div class="spinner" id="s-spin"></div>
+        <div class="panel" id="s-offline" hidden>
+          <div class="panel-head"><h2>ÇEVRİMDIŞI</h2></div>
+          <p class="panel-desc">İnternet yok. YouTube'da arama yapılamaz ama indirdiğin şarkılarla sıra kurmaya, listeleri düzenlemeye devam edebilirsin.</p>
+          <button class="btn" type="button" data-go="lib">KİTAPLIĞA GİT →</button>
+        </div>
+        <div class="sec" id="s-sec"></div>
+        <div class="list" id="s-list"></div>
+      </div>
+    </section>
+
+    <!-- KİTAPLIK -->
+    <section class="view" data-view="lib">
+      <div class="page">
+        <div class="seg" id="lib-mode">
+          <button type="button" data-mode="dl" aria-pressed="true">İNDİRİLEN</button>
+          <button type="button" data-mode="all" aria-pressed="false">TÜMÜ</button>
+          <button type="button" data-mode="liked" aria-pressed="false">BEĞENİ</button>
+          <button type="button" data-mode="lists" aria-pressed="false">LİSTELER</button>
+        </div>
+        <label class="search" id="lib-search">
+          <span class="ic" aria-hidden="true">&gt;</span>
+          <input id="lib-q" type="search" placeholder="kitaplıkta ara (internetsiz çalışır)" spellcheck="false" autocomplete="off" />
+          <button type="button" id="lib-q-x" hidden>✕</button>
+        </label>
+        <div class="bar" id="lib-bar">
+          <button class="btn btn-solid grow" type="button" id="lib-play">▶ HEPSİNİ ÇAL</button>
+          <button class="btn" type="button" id="lib-shuf">⤮ KARIŞIK</button>
+          <button class="btn" type="button" id="lib-add">＋ SIRAYA</button>
+        </div>
+        <div class="bar" id="lists-bar" hidden>
+          <button class="btn grow" type="button" id="pl-new">＋ YENİ LİSTE</button>
+          <button class="btn grow" type="button" id="pl-link">⇣ LİNKTEN AL</button>
+          <button class="btn" type="button" id="pl-sync" hidden>↻ YT</button>
+        </div>
+        <div class="sec" id="lib-sec"></div>
+        <div class="list" id="lib-list"></div>
+      </div>
+    </section>
+
+    <!-- mini çalar: dokun → tam ekran çalar + sıra -->
+    <div class="mini" id="mini" hidden>
+      <i class="prog" id="mini-prog"></i>
+      <div class="art" id="mini-art"></div>
+      <div class="t"><div class="nm" id="mini-title"></div><div class="ar" id="mini-artist"></div></div>
+      <button class="b" type="button" id="mini-play">▶</button>
+      <button class="b" type="button" id="mini-next">▶|</button>
+    </div>
+
+    <nav class="bnav" role="tablist">
+      <button type="button" role="tab" data-tab="home" aria-selected="true"><span class="g">⌂</span>ANA SAYFA</button>
+      <button type="button" role="tab" data-tab="search" aria-selected="false"><span class="g">⌕</span>ARA</button>
+      <button type="button" role="tab" data-tab="lib" aria-selected="false"><span class="g">≡</span>KİTAPLIK</button>
+    </nav>
+  </div>
+
+  <!-- ŞU AN ÇALAN + SIRA (tam ekran) -->
+  <div class="over" id="player" hidden>
+    <div class="over-head">
+      <button class="btn btn-ghost" type="button" id="player-close">⌄</button>
+      <h3>ŞU AN ÇALIYOR</h3>
+      <button class="btn btn-ghost" type="button" id="player-more">⋯</button>
+    </div>
+    <div class="page" id="now-page">
         <div class="panel np" id="np">
           <div class="np-cover"><div class="art" id="np-art"></div></div>
           <div class="np-meta">
@@ -57,64 +141,15 @@
           <div class="list" id="queue"></div>
         </div>
       </div>
-    </section>
+  </div>
 
-    <!-- KİTAPLIK -->
-    <section class="view" data-view="lib">
-      <div class="page">
-        <div class="seg" id="lib-mode">
-          <button type="button" data-mode="dl" aria-pressed="true">İNDİRİLEN</button>
-          <button type="button" data-mode="all" aria-pressed="false">TÜMÜ</button>
-          <button type="button" data-mode="liked" aria-pressed="false">BEĞENİ</button>
-          <button type="button" data-mode="lists" aria-pressed="false">LİSTELER</button>
-        </div>
-        <label class="search" id="lib-search">
-          <span class="ic" aria-hidden="true">&gt;</span>
-          <input id="lib-q" type="search" placeholder="kitaplıkta ara (internetsiz çalışır)" spellcheck="false" autocomplete="off" />
-          <button type="button" id="lib-q-x" hidden>✕</button>
-        </label>
-        <div class="bar" id="lib-bar">
-          <button class="btn btn-solid grow" type="button" id="lib-play">▶ HEPSİNİ ÇAL</button>
-          <button class="btn" type="button" id="lib-shuf">⤮ KARIŞIK</button>
-          <button class="btn" type="button" id="lib-add">＋ SIRAYA</button>
-        </div>
-        <div class="bar" id="lists-bar" hidden>
-          <button class="btn grow" type="button" id="pl-new">＋ YENİ LİSTE</button>
-          <button class="btn grow" type="button" id="pl-link">⇣ LİNKTEN AL</button>
-          <button class="btn" type="button" id="pl-sync" hidden>↻ YT</button>
-        </div>
-        <div class="sec" id="lib-sec"></div>
-        <div class="list" id="lib-list"></div>
-      </div>
-    </section>
-
-    <!-- ARA -->
-    <section class="view" data-view="search">
-      <div class="page">
-        <form class="search" id="s-form" autocomplete="off">
-          <span class="ic" aria-hidden="true">&gt;</span>
-          <input id="s-q" type="search" placeholder="YouTube Music'te ara ya da link yapıştır" spellcheck="false" enterkeyhint="search" />
-          <button type="submit">ARA</button>
-        </form>
-        <div class="seg" id="s-filter">
-          <button type="button" data-f="songs" aria-pressed="true">ŞARKI</button>
-          <button type="button" data-f="videos" aria-pressed="false">VİDEO</button>
-          <button type="button" data-f="albums" aria-pressed="false">ALBÜM</button>
-          <button type="button" data-f="playlists" aria-pressed="false">LİSTE</button>
-        </div>
-        <div class="spinner" id="s-spin"></div>
-        <div class="panel" id="s-offline" hidden>
-          <div class="panel-head"><h2>ÇEVRİMDIŞI</h2></div>
-          <p class="panel-desc">İnternet yok. YouTube'da arama yapılamaz ama indirdiğin şarkılarla sıra kurmaya, listeleri düzenlemeye devam edebilirsin.</p>
-          <button class="btn" type="button" data-go="lib">KİTAPLIĞA GİT →</button>
-        </div>
-        <div class="sec" id="s-sec"></div>
-        <div class="list" id="s-list"></div>
-      </div>
-    </section>
-
-    <!-- AYAR -->
-    <section class="view" data-view="settings">
+  <!-- AYARLAR (tam ekran, sağ üstteki ⚙) -->
+  <div class="over" id="settings" hidden>
+    <div class="over-head">
+      <button class="btn btn-ghost" type="button" id="settings-close">←</button>
+      <h3>AYARLAR</h3>
+      <span class="ver" id="ver"></span>
+    </div>
       <div class="page">
         <div class="panel" id="acct-panel">
           <div class="panel-head"><h2>HESAP</h2><div class="right"><span class="badge" id="acct-badge">GİRİŞ YOK</span></div></div>
@@ -220,16 +255,6 @@
           <div class="term term-mini" id="term"></div>
         </div>
       </div>
-    </section>
-
-    <!-- mini çalar: ÇALAN dışındaki sekmelerde -->
-    <div class="mini" id="mini" hidden>
-      <i class="prog" id="mini-prog"></i>
-      <div class="art" id="mini-art"></div>
-      <div class="t"><div class="nm" id="mini-title"></div><div class="ar" id="mini-artist"></div></div>
-      <button class="b" type="button" id="mini-play">▶</button>
-      <button class="b" type="button" id="mini-next">▶|</button>
-    </div>
   </div>
 
   <!-- Liste / albüm ayrıntısı (tam ekran) -->
@@ -251,6 +276,7 @@
   </div>
 
   <div class="toast" id="toast"></div>
+  <div class="jserr" id="jserr" hidden></div>
 
   <script src="app.js"></script>
 </body>

@@ -2,6 +2,13 @@
 
 YouTube Music için **çevrimdışı öncelikli** Android çalar. ULL-DPI / ULL-Bot ile aynı terminal teması (Matrix yağmuru olmadan).
 
+## Ekranlar
+
+- **Ana sayfa:** YT Music'teki gibi Hızlı seçim, Unutulan favoriler, karışıklar (girişliyse sana özel),
+  ayrıca telefondan: Son dinlenenler, Çok dinlediklerin, Listelerin, Yeni eklenenler. İnternetsiz de dolu gelir.
+- **Altta:** ANA SAYFA · ARA · KİTAPLIK. Mini çalara dokun → tam ekran çalar + sıra.
+- **Üstte:** solda profilin (giriş / eşitle / çıkış), sağda ⚙ ayarlar.
+
 ## Neden?
 
 Resmi uygulamada sıraya ekleme mobilde dağınık; internet yokken indirdiğin şarkılarla sıra bile kuramıyorsun. Burada:

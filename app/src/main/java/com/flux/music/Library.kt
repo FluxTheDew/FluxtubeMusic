@@ -29,6 +29,8 @@ data class Song(
     val liked: Boolean = false,
     /** Son çalınma (geçmiş için). */
     val playedAt: Long = 0,
+    /** Kaç kez çalındı (ana sayfa: çok dinlenenler, unutulan favoriler). */
+    val plays: Int = 0,
 ) {
     val isYt get() = id.startsWith("yt:")
     val isLocal get() = id.startsWith("local:")
@@ -48,6 +50,7 @@ data class Song(
         .put("addedAt", addedAt)
         .put("liked", liked)
         .put("playedAt", playedAt)
+        .put("plays", plays)
 
     /** Arayüze giden hali: dosya yolu yerine "çevrimdışı çalar mı?" bilgisi. */
     fun uiJson(): JSONObject = JSONObject()
@@ -61,6 +64,7 @@ data class Song(
         .put("liked", liked)
         .put("addedAt", addedAt)
         .put("playedAt", playedAt)
+        .put("plays", plays)
 
     companion object {
         fun fromJson(o: JSONObject) = Song(
@@ -73,6 +77,7 @@ data class Song(
             addedAt = o.optLong("addedAt", System.currentTimeMillis()),
             liked = o.optBoolean("liked", false),
             playedAt = o.optLong("playedAt", 0),
+            plays = o.optInt("plays", 0),
         )
     }
 }
@@ -211,7 +216,7 @@ object Library {
     }
 
     fun markPlayed(id: String) {
-        synchronized(this) { songs[id]?.let { songs[id] = it.copy(playedAt = System.currentTimeMillis()) } }
+        synchronized(this) { songs[id]?.let { songs[id] = it.copy(playedAt = System.currentTimeMillis(), plays = it.plays + 1) } }
         changed()
     }
 

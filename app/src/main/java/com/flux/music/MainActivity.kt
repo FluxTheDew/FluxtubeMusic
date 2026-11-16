@@ -477,6 +477,22 @@ class MainActivity : Activity() {
         @JavascriptInterface fun importLink(req: Int, url: String) = async(req) { Yt.importLink(url) }
         @JavascriptInterface fun openList(req: Int, url: String) = async(req) { Yt.playlist(url) }
 
+        /** YT liste kimliği: önce music.youtube.com API'si (gizli listeler, karışıklar), olmazsa NewPipe. */
+        @JavascriptInterface
+        fun openYt(req: Int, id: String) = async(req) {
+            try {
+                YtAccount.openList(id)
+            } catch (e: Exception) {
+                Logbook.add("SYS", "liste API'den açılamadı (${e.message}), NewPipe deneniyor")
+                Yt.playlist("https://www.youtube.com/playlist?list=$id")
+            }
+        }
+
+        @JavascriptInterface fun home(req: Int) = async(req) { YtAccount.home() }
+
+        /** Arayüzdeki JS hataları OLAYLAR'a düşsün. */
+        @JavascriptInterface fun jsError(msg: String) = Logbook.add("JS", msg.take(400))
+
         // yerel müzik
         @JavascriptInterface
         fun scanLocal(req: Int) = main.post {

@@ -78,7 +78,8 @@ object YtAccount {
         clientVersion?.let { return it }
         val v = runCatching {
             Net.client.newCall(
-                okhttp3.Request.Builder().url("$ORIGIN/").header("User-Agent", Net.UA).header("Cookie", cookie).build()
+                okhttp3.Request.Builder().url("$ORIGIN/").header("User-Agent", Net.UA)
+                    .apply { if (loggedIn) header("Cookie", cookie) }.build()
             ).execute().use { r ->
                 Regex("\"INNERTUBE_CLIENT_VERSION\":\"([^\"]+)\"").find(r.body?.string() ?: "")?.groupValues?.get(1)
             }
@@ -94,19 +95,18 @@ object YtAccount {
                 .put("client", JSONObject().put("clientName", "WEB_REMIX").put("clientVersion", ver).put("hl", "tr").put("gl", "TR"))
                 .put("user", JSONObject())
         )
-        val req = okhttp3.Request.Builder()
+        val b = okhttp3.Request.Builder()
             .url("$ORIGIN/youtubei/v1/$endpoint?prettyPrint=false$query")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .header("User-Agent", Net.UA)
-            .header("Cookie", cookie)
-            .header("Authorization", auth())
             .header("Origin", ORIGIN)
             .header("X-Origin", ORIGIN)
             .header("Referer", "$ORIGIN/")
-            .header("X-Goog-AuthUser", "0")
             .header("X-YouTube-Client-Name", "67")
             .header("X-YouTube-Client-Version", ver)
-            .build()
+        // Girişsiz de çalışsın (genel ana sayfa, herkese açık listeler).
+        if (loggedIn) b.header("Cookie", cookie).header("Authorization", auth()).header("X-Goog-AuthUser", "0")
+        val req = b.build()
         Net.client.newCall(req).execute().use { r ->
             if (r.code == 401 || r.code == 403) throw IOException("oturum geçersiz — yeniden giriş yap (HTTP ${r.code})")
             if (!r.isSuccessful) throw IOException("YouTube HTTP ${r.code}")
@@ -204,9 +204,16 @@ object YtAccount {
     }
 
     /** Bir listedeki tüm şarkılar (sayfa sayfa). */
-    fun playlistSongs(id: String, limit: Int = 5000): List<Song> {
+    fun playlistSongs(id: String, limit: Int = 5000): List<Song> = playlistPage(id, limit).second
+
+    /** (liste adı, şarkılar). */
+    fun playlistPage(id: String, limit: Int = 5000): Pair<String?, List<Song>> {
         val out = LinkedHashMap<String, Song>()
         val r0 = post("browse", JSONObject().put("browseId", "VL$id"))
+        val head = first(r0, "musicResponsiveHeaderRenderer") ?: first(r0, "musicDetailHeaderRenderer")
+            ?: first(r0, "musicEditablePlaylistDetailHeaderRenderer")
+        val name = text(head?.optJSONObject("title")).ifBlank { null }
+            ?: text(first(head, "title")).ifBlank { null }
         // Öneriler rafı karışmasın: önce listenin kendi rafı.
         val shelf: Any = first(r0, "musicPlaylistShelfRenderer") ?: first(r0, "musicShelfRenderer") ?: r0
         var r: Any = shelf
@@ -219,7 +226,98 @@ object YtAccount {
             if (token == null || ++pages > 100) break
             r = post("browse", JSONObject().put("continuation", token), "&ctoken=$token&continuation=$token&type=next")
         }
-        return out.values.take(limit)
+        return name to out.values.take(limit)
+    }
+
+    /** Radyo / karışık (RD…): "sıradaki" panelindeki şarkılar. */
+    private fun radio(id: String): Pair<String?, List<Song>> {
+        val r = post("next", JSONObject().put("playlistId", id).put("isAudioOnly", true).put("enablePersistentPlaylistPanel", true))
+        val out = LinkedHashMap<String, Song>()
+        for (v in all(r, "playlistPanelVideoRenderer")) {
+            val vid = v.optString("videoId").ifEmpty { null } ?: continue
+            val by = text(v.optJSONObject("shortBylineText")).ifBlank { text(v.optJSONObject("longBylineText")) }
+            out.putIfAbsent("yt:$vid", Song(
+                id = "yt:$vid",
+                title = text(v.optJSONObject("title")).ifBlank { "?" },
+                artist = by.split(" • ").first().trim(),
+                durationSec = parseDur(text(v.optJSONObject("lengthText"))),
+                thumb = lastThumb(v.optJSONObject("thumbnail")).ifEmpty { "https://i.ytimg.com/vi/$vid/hqdefault.jpg" },
+            ))
+        }
+        val name = text(first(r, "playlistPanelRenderer")?.optJSONObject("title")).ifBlank { null }
+        return name to out.values.toList()
+    }
+
+    /** Ana sayfadan / aramadan gelen bir listeyi aç: {name, songs}. */
+    fun openList(id: String): JSONObject {
+        val (name, songs) = if (id.startsWith("RD")) radio(id) else playlistPage(id)
+        if (songs.isEmpty()) throw IOException("liste boş ya da açılamadı")
+        val arr = JSONArray()
+        songs.forEach { arr.put(it.uiJson()) }
+        return JSONObject().put("name", name ?: "liste").put("songs", arr)
+    }
+
+    // --- ana sayfa -----------------------------------------------------------------------------
+
+    /**
+     * YT Music ana sayfası (girişliyse sana özel: Hızlı seçim, Unutulan favoriler…).
+     * [{title, rows:Boolean, items:[{kind:"song",…} | {kind:"list", list, title, artist, thumb}]}]
+     */
+    fun home(): JSONArray {
+        val out = JSONArray()
+        var r = post("browse", JSONObject().put("browseId", "FEmusic_home"))
+        var pages = 0
+        while (true) {
+            for (sh in all(r, "musicCarouselShelfRenderer")) {
+                val head = first(sh, "musicCarouselShelfBasicHeaderRenderer")
+                val title = text(head?.optJSONObject("title"))
+                if (title.isBlank()) continue
+                val items = JSONArray()
+                var rows = 0
+                val contents = sh.optJSONArray("contents") ?: continue
+                for (i in 0 until contents.length()) {
+                    val c = contents.optJSONObject(i) ?: continue
+                    c.optJSONObject("musicResponsiveListItemRenderer")?.let { li ->
+                        song(li)?.let { items.put(it.uiJson().put("kind", "song")); rows++ }
+                    }
+                    c.optJSONObject("musicTwoRowItemRenderer")?.let { tw -> card(tw)?.let { items.put(it) } }
+                }
+                if (items.length() > 0) out.put(
+                    JSONObject().put("title", title)
+                        .put("strap", text(head?.optJSONObject("strapline")))
+                        .put("rows", rows * 2 > items.length())
+                        .put("items", items)
+                )
+            }
+            val token = first(r, "nextContinuationData")?.optString("continuation")?.ifEmpty { null }
+                ?: first(r, "continuationCommand")?.optString("token")?.ifEmpty { null }
+            if (token == null || ++pages >= 4) break
+            r = post("browse", JSONObject().put("continuation", token), "&ctoken=$token&continuation=$token&type=next")
+        }
+        return out
+    }
+
+    private fun card(it: JSONObject): JSONObject? {
+        val title = text(it.optJSONObject("title")).ifBlank { return null }
+        val sub = text(it.optJSONObject("subtitle"))
+        val thumb = lastThumb(it.optJSONObject("thumbnailRenderer"))
+        val nav = it.optJSONObject("navigationEndpoint")
+        val parts = sub.split(" • ").map { s -> s.trim() }.filter { s -> s.isNotEmpty() }
+        nav?.optJSONObject("watchEndpoint")?.optString("videoId")?.ifEmpty { null }?.let { vid ->
+            return Song(
+                id = "yt:$vid", title = title,
+                artist = (if (parts.size > 1) parts[1] else parts.firstOrNull() ?: "").removeSuffix(" - Topic"),
+                durationSec = 0, thumb = thumb.ifEmpty { "https://i.ytimg.com/vi/$vid/hqdefault.jpg" },
+            ).uiJson().put("kind", "song")
+        }
+        val bid = nav?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
+        val list = when {
+            bid.startsWith("VL") -> bid.removePrefix("VL")
+            else -> nav?.optJSONObject("watchPlaylistEndpoint")?.optString("playlistId")?.ifEmpty { null }
+                ?: first(it, "watchPlaylistEndpoint")?.optString("playlistId")?.ifEmpty { null }
+        } ?: return null // sanatçı sayfaları vb. şimdilik yok
+        return JSONObject().put("kind", "list").put("list", list).put("title", title)
+            .put("artist", sub).put("thumb", thumb)
     }
 
     private fun song(r: JSONObject): Song? {
