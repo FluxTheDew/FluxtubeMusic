@@ -79,6 +79,14 @@
     return '<div class="art">' + (src ? '<img loading="lazy" src="' + esc(src) + '" onerror="this.remove()" alt="">' : "") + "</div>";
   }
 
+  /** Liste kapağı (kendi resmin / YT kapağı / ilk şarkı): Kotlin "pl:<id>" isteğini çözüyor. */
+  function coverUrl(p) {
+    return "https://fm.art/" + encodeURIComponent("pl:" + p.id) + "?v=" + (p.coverV || 0);
+  }
+  function coverHtml(p) {
+    return '<div class="art"><img loading="lazy" src="' + esc(coverUrl(p)) + '" onerror="this.remove()" alt=""></div>';
+  }
+
   let toastTimer = 0;
   function toast(text, bad) {
     const t = $("#toast");
@@ -117,40 +125,165 @@
     if (t === "home") renderHome();
     renderMini();
   }
-  $$(".bnav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.tab)));
+  $$(".bnav button").forEach((b) => b.addEventListener("click", () => {
+    // Alt menü her yerde: açık sayfaları kapatıp sekmeye git.
+    closeMenu(); closePlayer(); closeSettings();
+    if (!$("#sheet").hidden) closeSheet();
+    go(b.dataset.tab);
+  }));
   document.addEventListener("click", (e) => {
     const g = e.target.closest("[data-go]");
-    if (g) { closePlayer(); closeSettings(); go(g.dataset.go); }
+    if (g) { closePlayer(); closeSettings(); if (!$("#sheet").hidden) closeSheet(); go(g.dataset.go); }
   });
+
+  // --- animasyonlar (ayarlardan: her biri aç/kapa + hız) ------------------------------------
+
+  const ANIMS = [
+    { k: "tab", n: "Sekme geçişi", d: "ANA SAYFA · ARA · KİTAPLIK arasında", base: 200 },
+    { k: "over", n: "Sayfalar", d: "çalar, ayarlar, liste / sanatçı sayfaları, ayar alt sayfaları", base: 260 },
+    { k: "menu", n: "Alt menüler", d: "⋯ menüleri, profil menüsü", base: 220 },
+    { k: "modal", n: "Pencereler", d: "isim sorma, onay pencereleri", base: 170 },
+    { k: "toast", n: "Bildirimler", d: "alttaki kısa mesajlar", base: 180 },
+  ];
+  const ANIM_KEY = "fm.anim";
+  let anim = {};
+  function animDefaults() { const o = {}; ANIMS.forEach((x) => { o[x.k] = { on: true, speed: 1 }; }); return o; }
+  try { anim = Object.assign(animDefaults(), JSON.parse(localStorage.getItem(ANIM_KEY) || "{}")); } catch (e) { anim = animDefaults(); }
+  /** Bu animasyonun şu anki süresi (ms); kapalıysa 0. */
+  function ams(k) {
+    const d = ANIMS.find((x) => x.k === k);
+    const c = anim[k] || { on: true, speed: 1 };
+    return c.on && d ? Math.round(d.base / (Number(c.speed) || 1)) : 0;
+  }
+  function applyAnim() {
+    ANIMS.forEach((x) => document.documentElement.style.setProperty("--t-" + x.k, ams(x.k) + "ms"));
+    try { localStorage.setItem(ANIM_KEY, JSON.stringify(anim)); } catch (e) { /* yok */ }
+  }
+  applyAnim();
+
+  /** Sınıfı kaldırıp yeniden ekle: animasyon baştan oynasın. */
+  function replay(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+  function showOver(el) {
+    el._tok = (el._tok || 0) + 1;
+    el.hidden = false;
+    el.classList.remove("a-out");
+    replay(el, "a-in");
+  }
+  function hideOver(el, instant) {
+    const tok = (el._tok = (el._tok || 0) + 1);
+    el.classList.remove("a-in");
+    const t = instant ? 0 : ams("over");
+    if (!t) { el.hidden = true; return; }
+    el.classList.add("a-out");
+    setTimeout(() => { if (el._tok !== tok) return; el.hidden = true; el.classList.remove("a-out"); }, t);
+  }
+
+  /** Tam ekran sayfalar alt menünün (ve mini çaların) üstünde bitsin. */
+  function layoutChrome() {
+    const mini = $("#mini");
+    const top = !mini.hidden ? mini.getBoundingClientRect().top : $(".bnav").getBoundingClientRect().top;
+    document.documentElement.style.setProperty("--chrome", Math.max(0, Math.round(window.innerHeight - top)) + "px");
+  }
+  window.addEventListener("resize", layoutChrome);
 
   // --- tam ekran: çalar ve ayarlar -------------------------------------------------------
 
   function openPlayer() {
     playerOpen = true;
-    $("#player").hidden = false;
+    showOver($("#player"));
     renderMini();
-    const cur = $("#queue .row.is-cur");
-    if (cur) setTimeout(() => cur.scrollIntoView({ block: "center" }), 30);
+    $("#now-page").scrollTop = 0;
   }
-  function closePlayer() {
+  function closePlayer(instant) {
     if (!playerOpen) return;
     playerOpen = false;
-    $("#player").hidden = true;
+    hideOver($("#player"), instant === true);
     renderMini();
   }
+
+  let setPage = null;
   function openSettings() {
     settingsOpen = true;
-    $("#settings").hidden = false;
-    renderPrefs(); renderDownloads(); renderStats(); renderAccount(); pollLogs();
+    showOver($("#settings"));
+    showSetMenu(false);
+    renderPrefs(); renderDownloads(); renderStats(); renderAccount(); renderAnim();
   }
   function closeSettings() {
     if (!settingsOpen) return;
     settingsOpen = false;
-    $("#settings").hidden = true;
+    hideOver($("#settings"));
   }
-  $("#player-close").addEventListener("click", closePlayer);
-  $("#settings-close").addEventListener("click", closeSettings);
+  /** Ayarlar: her işlemin kendi sayfası. */
+  function openSub(k) {
+    setPage = k;
+    const t = $('#set-menu [data-open="' + k + '"] b');
+    $("#settings-title").textContent = t ? t.textContent.toLocaleUpperCase("tr") : "AYARLAR";
+    $("#set-menu").hidden = true;
+    $$("#settings .sp").forEach((p) => { p.hidden = p.dataset.sp !== k; });
+    const p = $('#settings .sp[data-sp="' + k + '"]');
+    if (p) replay(p, "a-in");
+    $("#settings .page").scrollTop = 0;
+    if (k === "log") pollLogs();
+    if (k === "dl") { renderDownloads(); renderStats(); }
+    if (k === "anim") renderAnim();
+  }
+  function showSetMenu(animate) {
+    setPage = null;
+    $("#settings-title").textContent = "AYARLAR";
+    $$("#settings .sp").forEach((p) => { p.hidden = true; });
+    const m = $("#set-menu");
+    m.hidden = false;
+    if (animate) replay(m, "a-in");
+  }
+  $("#set-menu").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-open]");
+    if (t) openSub(t.dataset.open);
+  });
+  $("#player-close").addEventListener("click", () => closePlayer());
+  $("#settings-close").addEventListener("click", () => { if (setPage) showSetMenu(true); else closeSettings(); });
   $("#gear").addEventListener("click", openSettings);
+
+  // Çaları aşağı çekerek kapat (sayfa en üstteyken); sayfa kaymışsa elle kaydır.
+  (function pullToClose() {
+    const pl = $("#player");
+    const page = $("#now-page");
+    let st = null;
+    pl.addEventListener("pointerdown", (e) => {
+      if (!e.target.closest(".over-head, .np") || e.target.closest("input, button")) return;
+      st = { x: e.clientX, y: e.clientY, dy: 0, mode: null, s0: page.scrollTop, head: !!e.target.closest(".over-head") };
+    });
+    pl.addEventListener("pointermove", (e) => {
+      if (!st) return;
+      const dx = e.clientX - st.x, dy = e.clientY - st.y;
+      if (!st.mode) {
+        if (Math.abs(dy) < 10 || Math.abs(dy) < Math.abs(dx)) { if (Math.abs(dx) > 14) st = null; return; }
+        // Başlıktan çekmek her zaman kapatır; kapaktan çekmek sadece sayfa en üstteyken.
+        st.mode = st.head ? (dy > 0 ? "pull" : "none") : (st.s0 > 0 || dy < 0 ? "scroll" : "pull");
+        if (st.mode === "none") { st = null; return; }
+        if (st.mode === "pull") pl.classList.add("is-pull");
+      }
+      if (st.mode === "scroll") { page.scrollTop = st.s0 - dy; return; }
+      st.dy = Math.max(0, dy);
+      pl.style.transform = "translateY(" + st.dy + "px)";
+    });
+    const end = () => {
+      if (!st) return;
+      const s0 = st;
+      st = null;
+      if (s0.mode !== "pull") return;
+      pl.classList.remove("is-pull");
+      pl.classList.add("pull-back");
+      if (s0.dy > 110) {
+        pl.style.transform = "translateY(100%)";
+        setTimeout(() => { pl.classList.remove("pull-back"); pl.style.transform = ""; closePlayer(true); }, 200);
+      } else {
+        pl.style.transform = "";
+        setTimeout(() => pl.classList.remove("pull-back"), 220);
+      }
+    };
+    pl.addEventListener("pointerup", end);
+    pl.addEventListener("pointercancel", end);
+  })();
   $("#player-more").addEventListener("click", () => menu({
     title: "SIRA",
     sub: queue.length + " şarkı",
@@ -163,10 +296,11 @@
 
   // Android geri tuşu: önce açık pencere, sonra ana sekme; en son uygulama arka plana.
   window.onBack = () => {
-    if ($(".modal")) { $(".modal").remove(); return true; }
-    if ($(".scrim")) { closeMenu(); return true; }
+    if ($(".modal:not(.a-out)")) { closeModal($(".modal:not(.a-out)")); return true; }
+    if ($(".scrim:not(.a-out)")) { closeMenu(); return true; }
     if (!$("#sheet").hidden) { closeSheet(); return true; }
     if (playerOpen) { closePlayer(); return true; }
+    if (settingsOpen && setPage) { showSetMenu(true); return true; }
     if (settingsOpen) { closeSettings(); return true; }
     if (tab !== "home") { go("home"); return true; }
     return false;
@@ -229,7 +363,7 @@
         lpFired = true;
         const it = getItems()[Number(row.dataset[attr])];
         if (it && it.kind === "pl") { openListMenu(it.id); return; }
-        if (it && it.kind !== "list") openSongMenu(it, Object.assign({ k: Number(row.dataset[attr]), items: getItems() }, getCtx ? getCtx() : {}));
+        if (it && it.kind === "song" || it && !it.kind) openSongMenu(it, Object.assign({ k: Number(row.dataset[attr]), items: getItems() }, getCtx ? getCtx() : {}));
       }, 520) };
     });
     const cancel = (e) => {
@@ -241,8 +375,13 @@
     el.addEventListener("pointerup", cancel);
     el.addEventListener("pointercancel", cancel);
     el.addEventListener("contextmenu", (e) => e.preventDefault());
+    attachSwipe(el, "↳ SIRADAKİ", (row) => {
+      const it = getItems()[Number(row.dataset[attr])];
+      if (it && (it.kind === "song" || !it.kind)) enqueue([it], "next");
+    });
     el.addEventListener("click", (e) => {
       if (lpFired) { lpFired = false; return; }
+      if (Date.now() - (el._swipeAt || 0) < 350) return;
       const row = e.target.closest(sel);
       if (!row || e.target.closest(".handle")) return;
       const k = Number(row.dataset[attr]);
@@ -250,13 +389,64 @@
       const it = items[k];
       if (!it) return;
       const ctx = Object.assign({ k, items }, getCtx ? getCtx() : {});
-      if (it.kind === "list") { openYtList(it.list || it.url, it.title); return; }
+      if (it.kind === "list") { openYtList(it.list || it.url, it.title, it.thumb); return; }
+      if (it.kind === "artist") { openArtist(it.artist, it.title, it.thumb); return; }
       if (it.kind === "pl") { openPlaylist(it.id); return; }
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "add") enqueue([it], "end");
       else if (act === "more") openSongMenu(it, ctx);
       else tapSong(it);
     });
+  }
+
+  /**
+   * Satırı soldan sağa kaydır → onGo(row). Dikey kaydırma bozulmasın diye
+   * sadece belirgin yatay harekette devreye girer. Yatay kayan rafların içinde kapalı.
+   */
+  function attachSwipe(listEl, label, onGo) {
+    let st = null;
+    listEl.addEventListener("pointerdown", (e) => {
+      const row = e.target.closest(".row");
+      if (!row || row.closest(".hscroll") || e.target.closest(".handle, input")) return;
+      st = { row, x: e.clientX, y: e.clientY, dx: 0, on: false };
+    });
+    listEl.addEventListener("pointermove", (e) => {
+      if (!st) return;
+      const dx = e.clientX - st.x, dy = e.clientY - st.y;
+      if (!st.on) {
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { st = null; return; }
+        if (dx < 14 || dx < Math.abs(dy) * 1.4) return;
+        st.on = true;
+        st.hint = document.createElement("div");
+        st.hint.className = "swipe-hint";
+        st.hint.textContent = label;
+        st.row.prepend(st.hint);
+        st.row.classList.add("is-swiping");
+        listEl._swipeAt = Date.now();
+      }
+      st.dx = Math.max(0, dx);
+      const w = st.row.offsetWidth;
+      const shown = st.dx < 90 ? st.dx : 90 + (st.dx - 90) * 0.35;
+      [...st.row.children].forEach((c) => { if (c !== st.hint) c.style.transform = "translateX(" + Math.min(shown, w * 0.6) + "px)"; });
+      st.hint.classList.toggle("is-go", st.dx >= 90);
+    });
+    const end = () => {
+      if (!st) return;
+      const s0 = st;
+      st = null;
+      if (!s0.on) return;
+      listEl._swipeAt = Date.now();
+      const kids = [...s0.row.children].filter((c) => c !== s0.hint);
+      kids.forEach((c) => { c.style.transition = "transform 0.18s ease-out"; c.style.transform = ""; });
+      setTimeout(() => {
+        kids.forEach((c) => { c.style.transition = ""; });
+        if (s0.hint) s0.hint.remove();
+        s0.row.classList.remove("is-swiping");
+      }, 190);
+      if (s0.dx >= 90) onGo(s0.row);
+    };
+    listEl.addEventListener("pointerup", end);
+    listEl.addEventListener("pointercancel", end);
   }
 
   /** ≡ tutamacından sürükleyerek sıralama. onMove(from, to). */
@@ -432,7 +622,18 @@
     });
   }
 
+  attachSwipe($("#queue"), "↳ SIRADAKİ YAP", (row) => {
+    const i = Number(row.dataset.i);
+    const to = S.index + 1;
+    if (i === S.index || i === to) { toast("zaten sırada"); return; }
+    FM.move(i, i < S.index ? S.index : to);
+    queue.splice(i < S.index ? S.index : to, 0, queue.splice(i, 1)[0]);
+    if (i < S.index) S.index--;
+    renderQueue();
+    toast("↳ sıradaki");
+  });
   $("#queue").addEventListener("click", (e) => {
+    if (Date.now() - ($("#queue")._swipeAt || 0) < 350) return;
     const row = e.target.closest(".row");
     if (!row || e.target.closest(".handle")) return;
     const i = Number(row.dataset.i);
@@ -484,7 +685,9 @@
   function renderMini() {
     const m = $("#mini");
     const c = S.cur;
+    const wasHidden = m.hidden;
     m.hidden = playerOpen || !c;
+    if (m.hidden !== wasHidden || !renderMini.laid) { renderMini.laid = true; layoutChrome(); }
     if (m.hidden) return;
     if (c.id !== miniId) {
       miniId = c.id;
@@ -535,7 +738,7 @@
 
   function itemArt(it) {
     let src = "";
-    if (it.kind === "pl") src = it.cover ? "https://fm.art/" + encodeURIComponent(it.cover) : "";
+    if (it.kind === "pl") src = coverUrl(it);
     else if (it.kind === "list") src = it.thumb || "";
     else src = it.known ? "https://fm.art/" + encodeURIComponent(it.id) : (it.thumb || "");
     return '<div class="art">' + (src ? '<img loading="lazy" src="' + esc(src) + '" onerror="this.remove()" alt="">' : "") + "</div>";
@@ -567,7 +770,7 @@
     if (forgotten.length) secs.push({ title: "Unutulan favoriler", strap: "bir süredir çalmadın", style: "cards", items: mine(forgotten), src: "TELEFON" });
     if (pls.length) secs.push({
       title: "Listelerin", style: "cards", src: "TELEFON",
-      items: pls.map((p) => ({ kind: "pl", id: p.id, title: p.name, artist: p.count + " şarkı" + (p.yt ? " · YT" : ""), cover: p.cover })),
+      items: pls.map((p) => ({ kind: "pl", id: p.id, title: p.name, artist: p.count + " şarkı" + (p.yt ? " · YT" : ""), coverV: p.coverV })),
     });
     if (yt.length && top.length) secs.push({ title: "Çok dinlediklerin", style: "grid", items: mine(top), src: "TELEFON" });
     if (fresh.length) secs.push({ title: "Yeni eklenenler", style: "cards", items: mine(fresh), src: "TELEFON" });
@@ -633,7 +836,8 @@
 
   // --- KİTAPLIK ------------------------------------------------------------------------------------
 
-  let libMode = "dl";
+  const LIB_MODES = [["lists", "LİSTELER"], ["dl", "İNDİRİLENLER"], ["liked", "BEĞENİLENLER"], ["all", "TÜM ŞARKILAR"]];
+  let libMode = "lists";
   let libShown = [];
   let lists = [];
   const LIB_LIMIT = 400;
@@ -649,13 +853,10 @@
   }
 
   function renderLib() {
-    $$("#lib-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === libMode)));
+    $("#lib-mode-name").textContent = (LIB_MODES.find((m) => m[0] === libMode) || LIB_MODES[0])[1];
     const isLists = libMode === "lists";
     $("#lib-bar").hidden = isLists;
-    $("#lists-bar").hidden = !isLists;
-    $("#pl-sync").hidden = !acct.loggedIn;
-    $("#lib-q").placeholder = isLists ? "listelerde ara" : "kitaplıkta ara (internetsiz çalışır)";
-    $("#lib-q-x").hidden = !$("#lib-q").value;
+    $("#lib-q").placeholder = isLists ? "listelerde ara" : "şarkı ara (internetsiz çalışır)";
     const el = $("#lib-list");
 
     if (isLists) {
@@ -664,12 +865,12 @@
       const shown = q ? lists.filter((p) => norm(p.name).includes(q)) : lists;
       $("#lib-sec").innerHTML = "<b>≡</b> " + lists.length + " liste";
       if (!shown.length) {
-        el.innerHTML = '<div class="empty-box">' + (lists.length ? "eşleşen liste yok" : "henüz liste yok — ＋ YENİ LİSTE ya da bir YouTube listesini linkten al") + "</div>";
+        el.innerHTML = '<div class="empty-box">' + (lists.length ? "eşleşen liste yok" : "henüz liste yok — ＋ ile yeni liste ya da YouTube linki") + "</div>";
         return;
       }
       el.innerHTML = shown.map((p) =>
         '<div class="row pl-row" data-pl="' + esc(p.id) + '">' +
-        (p.cover ? artHtml({ id: p.cover }, false) : '<div class="art"></div>') +
+        coverHtml(p) +
         '<div class="t"><div class="nm">' + esc(p.name) + '</div><div class="ar">' + (p.yt ? '<span class="yt-tag">YT</span> · ' : "") + p.count + " şarkı · " +
         (p.dl === p.count && p.count ? '<span class="dl">↓ hepsi indirili</span>' : p.dl + " indirili") + "</div></div>" +
         '<button class="more" type="button" data-act="plmore">⋯</button></div>').join("");
@@ -693,9 +894,32 @@
       (libShown.length > part.length ? '<button class="btn btn-ghost" style="margin:1rem auto" type="button" id="lib-more">+ ' + (libShown.length - part.length) + " DAHA</button>" : "");
   }
 
-  $$("#lib-mode button").forEach((b) => b.addEventListener("click", () => { libMode = b.dataset.mode; libLimit = LIB_LIMIT; renderLib(); }));
+  // Görünüm düğmesi: dokun → sonraki (LİSTELER → İNDİRİLENLER → BEĞENİLENLER → TÜM ŞARKILAR).
+  $("#lib-mode").addEventListener("click", () => {
+    const i = LIB_MODES.findIndex((m) => m[0] === libMode);
+    libMode = LIB_MODES[(i + 1) % LIB_MODES.length][0];
+    libLimit = LIB_LIMIT;
+    $("#lib-list").scrollTop = 0;
+    replay($("#lib-list"), "a-sw");
+    renderLib();
+  });
+  $("#lib-find").addEventListener("click", () => {
+    const box = $("#lib-search");
+    box.hidden = !box.hidden;
+    $("#lib-find").setAttribute("aria-pressed", String(!box.hidden));
+    if (box.hidden) { $("#lib-q").value = ""; renderLib(); } else $("#lib-q").focus();
+  });
+  $("#lib-new").addEventListener("click", () => menu({
+    title: "EKLE",
+    items: [
+      { g: "≡", t: "Yeni liste", fn: () => ask("YENİ LİSTE", "", (name) => { FM.createPlaylist(name, "[]"); toast("≡ oluşturuldu: " + name); libMode = "lists"; renderLib(); }) },
+      { g: "⇣", t: "YouTube linkinden al", sub: "liste ya da şarkı", fn: () => ask("YOUTUBE / YT MUSIC LİNKİ", "", (url) => importLink(url), { placeholder: "https://music.youtube.com/playlist?list=…", ok: "AL" }) },
+      acct.loggedIn && { g: "↻", t: "YouTube kitaplığını eşitle", fn: syncAccount },
+      { g: "◆", t: "Telefondaki müzikleri tara", fn: () => $("#scan").click() },
+    ],
+  }));
   $("#lib-q").addEventListener("input", () => { libLimit = LIB_LIMIT; renderLib(); });
-  $("#lib-q-x").addEventListener("click", (e) => { e.preventDefault(); $("#lib-q").value = ""; renderLib(); });
+  $("#lib-q-x").addEventListener("click", (e) => { e.preventDefault(); $("#lib-find").click(); });
   bindSongList($("#lib-list"), () => libShown, () => ({ kind: "lib" }));
   $("#lib-list").addEventListener("click", (e) => {
     if (e.target.closest("#lib-more")) { libLimit += LIB_LIMIT; renderLib(); return; }
@@ -707,11 +931,6 @@
   $("#lib-play").addEventListener("click", () => { if (libShown.length) enqueue(libShown, "replace"); else toast("liste boş"); });
   $("#lib-shuf").addEventListener("click", () => { if (libShown.length) enqueue(libShown, "shuffle"); else toast("liste boş"); });
   $("#lib-add").addEventListener("click", () => { if (libShown.length) enqueue(libShown, "end"); else toast("liste boş"); });
-  $("#pl-new").addEventListener("click", () => ask("YENİ LİSTE", "", (name) => { FM.createPlaylist(name, "[]"); toast("≡ oluşturuldu: " + name); renderLib(); }));
-  $("#pl-link").addEventListener("click", () => {
-    ask("YOUTUBE / YT MUSIC LİNKİ", "", (url) => importLink(url), { placeholder: "https://music.youtube.com/playlist?list=…", ok: "AL" });
-  });
-
   // --- liste ayrıntısı (sheet) ---------------------------------------------------------------------
 
   /** sh = { kind: "pl" | "yt", id?, url?, name, songs } */
@@ -719,41 +938,59 @@
 
   function openSheet(data) {
     sh = data;
-    $("#sheet").hidden = false;
+    if ($("#sheet").hidden || $("#sheet").classList.contains("a-out")) showOver($("#sheet"));
+    $("#sheet-list").scrollTop = 0;
     renderSheet();
   }
   function closeSheet() {
-    $("#sheet").hidden = true;
+    hideOver($("#sheet"));
     sh = null;
     spinner($("#sheet-spin"), false);
   }
   function renderSheet() {
     if (!sh) return;
-    $("#sheet-title").textContent = sh.name || "LİSTE";
+    $("#sheet-title").textContent = sh.kind === "artist" ? "SANATÇI" : "LİSTE";
     const songs = sh.songs || [];
+    const hero = $("#sheet-hero");
+    if (sh.loading && !sh.name) hero.innerHTML = "";
+    else {
+      const img = sh.kind === "pl" ? coverHtml(sh)
+        : '<div class="art">' + (sh.thumb ? '<img src="' + esc(sh.thumb) + '" onerror="this.remove()" alt="">' : "") + "</div>";
+      const sub = sh.kind === "artist" ? "sanatçı" : sh.kind === "pl" ? (sh.yt ? "YouTube'dan eşitlendi" : "senin listen") : "YouTube";
+      const btns = (sh.kind === "pl" ? '<button class="btn btn-ghost" type="button" data-hero="cover">▣ KAPAK</button>' : "") +
+        (sh.kind === "artist" && sh.allId ? '<button class="btn btn-ghost" type="button" data-hero="all">TÜM ŞARKILAR →</button>' : "");
+      hero.innerHTML = img + '<div class="t"><div class="nm">' + esc(sh.name || "") + '</div><div class="ar">' + sub + "</div>" + btns + "</div>";
+    }
     const dl = songs.filter((s) => s.dl).length;
     $("#sheet-sec").innerHTML = sh.loading ? "" : "<b>♪</b> " + songs.length + " şarkı · " + dl + " indirili" + (sh.kind === "yt" ? " · YouTube'dan" : "");
     $("#sheet-bar").hidden = !!sh.loading;
     const el = $("#sheet-list");
     if (sh.loading) { el.innerHTML = ""; return; }
     if (!songs.length) {
-      el.innerHTML = '<div class="empty-box">' + (sh.kind === "pl" ? "liste boş — şarkılarda ⋯ → LİSTEYE EKLE" : "şarkı bulunamadı") + "</div>";
-      return;
+      if (!(sh.lists || []).length) {
+        el.innerHTML = '<div class="empty-box">' + (sh.kind === "pl" ? "liste boş — şarkılarda ⋯ → LİSTEYE EKLE" : "şarkı bulunamadı") + "</div>";
+        return;
+      }
     }
-    el.innerHTML = songs.map((s, k) => songRow(s, k, { handle: sh.kind === "pl", remote: sh.kind === "yt" && !s.dl })).join("");
+    const ls = sh.lists || [];
+    el.innerHTML = songs.map((s, k) => songRow(s, k, { handle: sh.kind === "pl", remote: sh.kind !== "pl" && !s.dl })).join("") +
+      (ls.length ? '<div class="sec" style="padding:1.2rem 0 .3rem"><b>≡</b> ALBÜMLER · TEKLİLER</div>' + ls.map((r, i) =>
+        '<div class="row pl-row" data-k="' + (songs.length + i) + '">' + artHtml(r, true) +
+        '<div class="t"><div class="nm">' + esc(r.title) + '</div><div class="ar">' + esc(r.artist || "") + "</div></div>" +
+        '<span class="more">→</span></div>').join("") : "");
   }
   function openPlaylist(id) {
     const p = J(FM.playlist(id), null);
     if (!p) { toast("liste bulunamadı", true); return; }
-    openSheet({ kind: "pl", id: p.id, name: p.name, songs: p.songs });
+    openSheet({ kind: "pl", id: p.id, name: p.name, songs: p.songs, coverV: p.coverV, yt: p.yt });
   }
   function reloadSheet() {
     if (sh && sh.kind === "pl") {
       const p = J(FM.playlist(sh.id), null);
       if (!p) { closeSheet(); return; }
-      sh.name = p.name; sh.songs = p.songs;
+      sh.name = p.name; sh.songs = p.songs; sh.coverV = p.coverV;
       renderSheet();
-    } else if (sh && sh.kind === "yt" && sh.songs) {
+    } else if (sh && sh.kind !== "pl" && sh.songs) {
       // İndirme durumu değişmiş olabilir.
       const byId = new Map(lib.map((s) => [s.id, s]));
       sh.songs = sh.songs.map((s) => byId.get(s.id) || s);
@@ -761,11 +998,28 @@
     }
   }
   /** YouTube listesi / albüm / karışık: kimlik (PL…, OLAK…, RD…) ya da adres. */
-  function openYtList(ref, name) {
+  function openArtist(id, name, thumb) {
+    if (!S.online) { toast("internet yok", true); return; }
+    const ref = "artist:" + id;
+    openSheet({ kind: "artist", url: ref, name: name || "", thumb: thumb || "", loading: true, songs: [], lists: [] });
+    spinner($("#sheet-spin"), true);
+    call("artist", id).then((d) => {
+      if (!sh || sh.url !== ref) return;
+      spinner($("#sheet-spin"), false);
+      Object.assign(sh, { loading: false, name: d.name || name, thumb: d.thumb || thumb, songs: d.songs || [], lists: d.lists || [], allId: d.all || null });
+      renderSheet();
+    }).catch((e) => {
+      spinner($("#sheet-spin"), false);
+      if (sh && sh.url === ref) { sh.loading = false; renderSheet(); }
+      toast("sanatçı açılamadı: " + e.message, true);
+    });
+  }
+
+  function openYtList(ref, name, thumb) {
     if (!S.online) { toast("internet yok", true); return; }
     const m = /[?&]list=([\w-]+)/.exec(ref || "");
     const id = m ? m[1] : (/^[\w-]+$/.test(ref || "") ? ref : null);
-    openSheet({ kind: "yt", url: ref, name: name || "LİSTE", loading: true, songs: [] });
+    openSheet({ kind: "yt", url: ref, name: name || "LİSTE", thumb: thumb || "", loading: true, songs: [] });
     spinner($("#sheet-spin"), true);
     (id ? call("openYt", id) : call("openList", ref)).then((d) => {
       if (!sh || sh.url !== ref) return;
@@ -797,7 +1051,13 @@
   }
 
   $("#sheet-back").addEventListener("click", closeSheet);
-  bindSongList($("#sheet-list"), () => (sh ? sh.songs : []), () => (sh ? { kind: sh.kind, pid: sh.id } : {}));
+  bindSongList($("#sheet-list"), () => (sh ? sh.songs.concat(sh.lists || []) : []), () => (sh ? { kind: sh.kind, pid: sh.id } : {}));
+  $("#sheet-hero").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-hero]");
+    if (!b || !sh) return;
+    if (b.dataset.hero === "cover") coverMenu(sh.id);
+    if (b.dataset.hero === "all") openYtList(sh.allId, sh.name + " · tüm şarkılar");
+  });
   makeDraggable($("#sheet-list"), (from, to) => {
     if (!sh || sh.kind !== "pl") return;
     FM.plMove(sh.id, from, to);
@@ -831,6 +1091,18 @@
     openPlaylist(id);
   }
 
+  function coverMenu(pid) {
+    const p = J(FM.playlist(pid), null);
+    if (!p) return;
+    menu({
+      title: "KAPAK", sub: p.name,
+      items: [
+        { g: "▣", t: "Galeriden resim seç", fn: () => { FM.pickCover(pid); toast("resim seç"); } },
+        p.coverV && { g: "✕", t: "Kendi kapağımı kaldır", sub: "YouTube kapağına / ilk şarkıya dön", fn: () => { FM.removeCover(pid); toast("kapak kaldırıldı"); } },
+      ],
+    });
+  }
+
   function openListMenu(pid) {
     const p = J(FM.playlist(pid), null);
     if (!p) return;
@@ -848,6 +1120,7 @@
           toast("↻ tazeleniyor…");
           call("syncList", pid).then((d) => { toast("↻ " + d.songs + " şarkı"); reloadSheet(); }).catch((e) => toast(e.message, true));
         } },
+        { g: "▣", t: "Kapak resmi", sub: "galeriden seç", fn: () => coverMenu(pid) },
         { g: "✎", t: "Yeniden adlandır", fn: () => ask("LİSTEYİ YENİDEN ADLANDIR", p.name, (name) => { FM.plRename(pid, name); reloadSheet(); renderLib(); }) },
         { g: "✕", t: "Listeyi sil", danger: true, fn: () => confirmDo("“" + p.name + "” silinsin mi? Şarkılar kitaplıkta kalır.", () => { FM.plDelete(pid); if (sh && sh.id === pid) closeSheet(); renderLib(); toast("liste silindi"); }) },
       ],
@@ -863,12 +1136,22 @@
   function renderSearchState() {
     $("#s-offline").hidden = !!S.online;
   }
+  function subs(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(".", ",") + " Mn";
+    if (n >= 1e3) return Math.round(n / 1e3) + " B";
+    return String(n);
+  }
   function renderSearch() {
     const el = $("#s-list");
     $("#s-sec").innerHTML = sLastQ ? "<b>&gt;</b> “" + esc(sLastQ) + "” · " + sResults.length + " sonuç" : "";
     if (!sResults.length) { el.innerHTML = sLastQ ? '<div class="empty-box">sonuç yok</div>' : ""; return; }
     const byId = new Map(lib.map((s) => [s.id, s]));
     el.innerHTML = sResults.map((r, k) => {
+      if (r.kind === "artist") {
+        return '<div class="row pl-row" data-k="' + k + '">' + artHtml(r, true) +
+          '<div class="t"><div class="nm">' + esc(r.title) + '</div><div class="ar">sanatçı' + (r.subs > 0 ? " · " + subs(r.subs) + " abone" : "") + "</div></div>" +
+          '<span class="more">→</span></div>';
+      }
       if (r.kind === "list") {
         return '<div class="row pl-row" data-k="' + k + '">' + artHtml(r, true) +
           '<div class="t"><div class="nm">' + esc(r.title) + '</div><div class="ar">' + esc(r.artist || "") + (r.count > 0 ? " · " + r.count + " şarkı" : "") + "</div></div>" +
@@ -911,7 +1194,21 @@
 
   // --- şarkı menüsü --------------------------------------------------------------------------------
 
-  function closeMenu() { $$(".scrim").forEach((m) => m.remove()); }
+  function closeMenu() {
+    $$(".scrim:not(.a-out)").forEach((m) => {
+      const t = ams("menu");
+      if (!t) { m.remove(); return; }
+      m.classList.add("a-out");
+      setTimeout(() => m.remove(), t);
+    });
+  }
+  function closeModal(m) {
+    if (!m || m.classList.contains("a-out")) return;
+    const t = ams("modal");
+    if (!t) { m.remove(); return; }
+    m.classList.add("a-out");
+    setTimeout(() => m.remove(), t);
+  }
 
   /** m = { title, sub, song, items:[{g, t, sub, danger, fn}] } */
   function menu(m) {
@@ -983,12 +1280,12 @@
       '<div class="row-btns"><button class="btn btn-ghost" type="button" data-x>VAZGEÇ</button><button class="btn btn-solid" type="submit">' + esc(o.ok || "TAMAM") + "</button></div></form>";
     const inp = $("input", m);
     inp.value = value || "";
-    m.addEventListener("click", (e) => { if (e.target === m || e.target.closest("[data-x]")) m.remove(); });
+    m.addEventListener("click", (e) => { if (e.target === m || e.target.closest("[data-x]")) closeModal(m); });
     $("form", m).addEventListener("submit", (e) => {
       e.preventDefault();
       const v = inp.value.trim();
       if (!v) { inp.focus(); return; }
-      m.remove();
+      closeModal(m);
       done(v);
     });
     document.body.appendChild(m);
@@ -1001,8 +1298,8 @@
     m.innerHTML = '<div class="modal-box"><h3>EMİN MİSİN?</h3><p class="panel-desc" style="margin:0">' + esc(text) + '</p>' +
       '<div class="row-btns"><button class="btn btn-ghost" type="button" data-x>VAZGEÇ</button><button class="btn btn-danger" type="button" data-ok>SİL</button></div></div>';
     m.addEventListener("click", (e) => {
-      if (e.target.closest("[data-ok]")) { m.remove(); fn(); setTimeout(poll, 120); return; }
-      if (e.target === m || e.target.closest("[data-x]")) m.remove();
+      if (e.target.closest("[data-ok]")) { closeModal(m); fn(); setTimeout(poll, 120); return; }
+      if (e.target === m || e.target.closest("[data-x]")) closeModal(m);
     });
     document.body.appendChild(m);
   }
@@ -1049,6 +1346,7 @@
     $("#acct-out").hidden = !!acct.loggedIn;
     $("#acct-in").hidden = !acct.loggedIn;
     $("#acct-badge").textContent = acct.loggedIn ? "BAĞLI" : "GİRİŞ YOK";
+    $("#sm-acct").textContent = acct.loggedIn ? (acct.name || "bağlı") + (acct.handle ? " · " + acct.handle : "") : "giriş yapılmadı";
     $("#acct-badge").className = "badge" + (acct.loggedIn ? " red" : "");
     $("#me").classList.toggle("is-in", !!acct.loggedIn);
     const ma = $("#me-art");
@@ -1123,7 +1421,6 @@
       });
     }
   });
-  $("#pl-sync").addEventListener("click", syncAccount);
 
   // --- AYAR ------------------------------------------------------------------------------------------
 
@@ -1151,6 +1448,7 @@
   function renderStats() {
     const st = J(FM.stats(), {});
     $("#st-bytes").textContent = bytes(st.bytes || 0) + " · " + (st.downloaded || 0) + " şarkı";
+    $("#sm-dl").textContent = (st.downloaded || 0) + " şarkı indirili · " + bytes(st.bytes || 0);
     $("#st-local").textContent = (st.local || 0) + " şarkı";
   }
 
@@ -1191,6 +1489,7 @@
     $("#upd-bar").hidden = !(u.phase === "downloading" || u.phase === "installing");
     $("#upd-fill").style.width = Math.round((u.progress || 0) * 100) + "%";
     $("#upd-badge").hidden = u.phase !== "available";
+    $("#sm-upd").innerHTML = "kurulu v" + esc(u.current) + (u.phase === "available" ? ' · yeni: <b class="red">' + esc(u.latest) + "</b>" : "");
     $("#upd-check").disabled = u.phase === "checking" || u.phase === "downloading";
     const notes = $("#upd-notes");
     notes.hidden = !(u.phase === "available" && u.notes);
@@ -1215,6 +1514,43 @@
     FM.checkUpdate(); setTimeout(poll, 150);
   });
   $("#upd-install").addEventListener("click", () => { FM.installUpdate(); setTimeout(poll, 150); });
+
+  // --- animasyon ayarları ------------------------------------------------------------------------
+
+  function renderAnim() {
+    $("#anim-list").innerHTML = ANIMS.map((x) => {
+      const c = anim[x.k];
+      return '<div class="an-row' + (c.on ? "" : " is-off") + '" data-an="' + x.k + '">' +
+        '<div class="head"><div class="n">' + x.n + '</div><span class="val">' + (c.on ? Number(c.speed).toFixed(2).replace(/0$/, "") + "×" : "kapalı") + "</span>" +
+        '<button class="switch" type="button" role="switch" aria-checked="' + c.on + '"></button></div>' +
+        '<div class="d">' + x.d + " · " + (c.on ? ams(x.k) + " ms" : "anında") + "</div>" +
+        '<input type="range" min="0.25" max="3" step="0.25" value="' + c.speed + '" aria-label="hız" />' +
+        '<div class="row-btns demo"><button class="btn btn-ghost" type="button" data-demo>DENE ▶</button></div></div>';
+    }).join("");
+  }
+  $("#anim-list").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-an]");
+    if (!row) return;
+    const k = row.dataset.an;
+    if (e.target.closest(".switch")) { anim[k].on = !anim[k].on; applyAnim(); renderAnim(); return; }
+    if (e.target.closest("[data-demo]")) {
+      if (k === "menu") menu({ title: "ÖRNEK MENÜ", sub: "hız: " + anim.menu.speed + "×", items: [{ g: "✓", t: "Tamam", fn: () => {} }] });
+      else if (k === "modal") confirmDo("Bu bir örnek pencere.", () => {});
+      else if (k === "toast") toast("örnek bildirim");
+      else if (k === "over") { showSetMenu(true); setTimeout(() => openSub("anim"), Math.max(80, ams("over"))); }
+      else if (k === "tab") { closeSettings(); go(tab === "home" ? "lib" : "home"); }
+    }
+  });
+  $("#anim-list").addEventListener("input", (e) => {
+    const row = e.target.closest("[data-an]");
+    if (!row || e.target.type !== "range") return;
+    anim[row.dataset.an].speed = Number(e.target.value);
+    applyAnim();
+    const c = anim[row.dataset.an];
+    $(".val", row).textContent = c.on ? c.speed.toFixed(2).replace(/0$/, "") + "×" : "kapalı";
+    $(".d", row).textContent = ANIMS.find((x) => x.k === row.dataset.an).d + " · " + (c.on ? ams(row.dataset.an) + " ms" : "anında");
+  });
+  $("#anim-reset").addEventListener("click", () => { anim = animDefaults(); applyAnim(); renderAnim(); toast("animasyonlar varsayılana döndü"); });
 
   // --- olaylar ---------------------------------------------------------------------------------------
 
@@ -1357,7 +1693,9 @@
       download: () => 1,
       downloads: () => JSON.stringify([{ id: "yt:mock2", title: "Kara Sevda", state: "run", progress: 0.42, error: null }, { id: "yt:mock5", title: "Cemalim", state: "done", progress: 1, error: null }]),
       dlCancel: () => {}, dlClear: () => {},
-      search: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: songs.slice(3, 9).map((s) => Object.assign({ kind: "song" }, s)) })), 600),
+      search: (req, q, f) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: f === "artists"
+        ? [{ kind: "artist", artist: "UC1", title: "TV Girl", subs: 1240000, thumb: "" }]
+        : songs.slice(3, 9).map((s) => Object.assign({ kind: "song" }, s)) })), 600),
       importLink: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "örnek liste", songs: songs.slice(0, 5) } })), 600),
       openList: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "albüm", songs: songs.slice(2, 8) } })), 600),
       scanLocal: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { count: 0 } })), 300),
@@ -1369,6 +1707,8 @@
       ] })), 500),
       openYt: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "Mix 1", songs: songs.slice(1, 6) } })), 500),
       jsError: () => {},
+      boot: () => {}, touch: () => {}, pickCover: () => {}, removeCover: () => {},
+      artist: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "TV Girl", thumb: "", all: "OLAK1", songs: songs.slice(0, 5), lists: [{ kind: "list", list: "OLAK2", title: "French Exit", artist: "Albüm · 2014", thumb: "" }] } })), 400),
       account: () => JSON.stringify({ loggedIn: true, name: "Flux", handle: "@fluxthedew", photo: "", syncedAt: Date.now() - 36e5 }),
       login: () => {}, logout: () => {},
       syncAccount: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { lists: 4, songs: 212 } })), 1500),

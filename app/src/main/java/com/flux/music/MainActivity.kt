@@ -61,6 +61,7 @@ class MainActivity : Activity() {
     /** "Sıradaki" ile art arda eklenenler sırayla dursun diye sayaç. */
     private var nextAdds = 0
     private var pendingScan = -1
+    private var pendingCover: String? = null
     private val noArt = Collections.synchronizedSet(HashSet<String>())
 
     // --- teşhis: arayüz açılmazsa / donarsa Android'in kendi penceresiyle göster ---
@@ -377,6 +378,7 @@ class MainActivity : Activity() {
         WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
 
     private fun art(id: String): WebResourceResponse? {
+        if (id.startsWith("pl:")) return playlistArt(id.removePrefix("pl:"))
         val f = Library.artFile(id)
         if (!f.exists() && id !in noArt) {
             val s = Library.get(id)
@@ -398,6 +400,52 @@ class MainActivity : Activity() {
         }
         if (!f.exists() || f.length() == 0L) return null
         return WebResourceResponse("image/jpeg", null, 200, "OK", mapOf("Cache-Control" to "max-age=86400"), FileInputStream(f))
+    }
+
+    private fun fileResponse(f: java.io.File) =
+        WebResourceResponse("image/jpeg", null, 200, "OK", mapOf("Cache-Control" to "max-age=86400"), FileInputStream(f))
+
+    /** Liste kapağı: kendi seçtiğin resim → YouTube'daki kapak (bir kez indirilip saklanır) → ilk şarkının kapağı. */
+    private fun playlistArt(pid: String): WebResourceResponse? {
+        Library.coverFile(pid).takeIf { it.exists() && it.length() > 0 }?.let { return fileResponse(it) }
+        val p = Library.playlist(pid) ?: return null
+        val cached = Library.artFile("pl:$pid")
+        if (!cached.exists() && !p.thumb.isNullOrEmpty() && Net.online(this)) runCatching {
+            Net.client.newCall(okhttp3.Request.Builder().url(p.thumb).header("User-Agent", Net.UA).build()).execute().use { r ->
+                if (r.isSuccessful) r.body?.bytes()?.takeIf { it.isNotEmpty() }?.let { cached.writeBytes(it) }
+            }
+        }
+        if (cached.exists() && cached.length() > 0) return fileResponse(cached)
+        return p.songs.firstOrNull()?.let { art(it) }
+    }
+
+    @Deprecated("Activity API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_COVER) return
+        val pid = pendingCover ?: return
+        pendingCover = null
+        val uri = data?.data ?: return
+        bg.execute {
+            try {
+                // Büyük fotoğrafları küçült: en fazla ~800 px, JPEG.
+                val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+                var sample = 1
+                while (maxOf(opts.outWidth, opts.outHeight) / sample > 1000) sample *= 2
+                val bmp = contentResolver.openInputStream(uri)?.use {
+                    android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                } ?: throw java.io.IOException("resim okunamadı")
+                val side = minOf(bmp.width, bmp.height)
+                val square = android.graphics.Bitmap.createBitmap(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side)
+                Library.coverFile(pid).outputStream().use { square.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+                Library.bump()
+                Logbook.add("SYS", "liste kapağı değişti")
+            } catch (e: Exception) {
+                Logbook.add("ERR", "kapak kaydedilemedi: ${e.message}")
+            }
+        }
     }
 
     // --- yardımcılar ------------------------------------------------------------------
@@ -539,7 +587,9 @@ class MainActivity : Activity() {
                 put(JSONObject().put("id", p.id).put("name", p.name).put("count", songs.size)
                     .put("yt", p.src != null)
                     .put("dl", songs.count { it.offline })
-                    .put("cover", songs.firstOrNull()?.id ?: JSONObject.NULL))
+                    .put("cover", "pl:" + p.id)
+                    // Kapak değişince WebView önbelleği eskisini göstermesin.
+                    .put("coverV", Library.coverFile(p.id).let { f -> if (f.exists()) f.lastModified() else 0L }))
             }
         }.toString()
 
@@ -547,6 +597,8 @@ class MainActivity : Activity() {
         fun playlist(id: String): String {
             val p = Library.playlist(id) ?: return "null"
             return JSONObject().put("id", p.id).put("name", p.name).put("yt", p.src != null)
+                .put("cover", "pl:" + p.id)
+                .put("coverV", Library.coverFile(p.id).let { f -> if (f.exists()) f.lastModified() else 0L })
                 .put("songs", songsJson(p.songs.mapNotNull { Library.get(it) })).toString()
         }
 
@@ -597,6 +649,22 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface fun home(req: Int) = async(req) { YtAccount.home() }
+        @JavascriptInterface fun artist(req: Int, id: String) = async(req) { YtAccount.artist(id) }
+
+        /** Liste kapağı: galeriden resim seç / kaldır. */
+        @JavascriptInterface fun pickCover(pid: String) = main.post {
+            pendingCover = pid
+            @Suppress("DEPRECATION")
+            startActivityForResult(
+                android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).setType("image/*")
+                    .addCategory(android.content.Intent.CATEGORY_OPENABLE),
+                REQ_COVER,
+            )
+        }
+        @JavascriptInterface fun removeCover(pid: String) {
+            Library.coverFile(pid).delete()
+            Library.bump()
+        }
 
         /** app.js başladı / bitti; teşhis için. */
         @JavascriptInterface fun boot(stage: String) {
@@ -657,5 +725,6 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_NOTIF = 2
         private const val REQ_AUDIO = 3
+        private const val REQ_COVER = 4
     }
 }

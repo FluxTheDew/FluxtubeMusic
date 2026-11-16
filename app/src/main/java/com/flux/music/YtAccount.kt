@@ -180,7 +180,7 @@ object YtAccount {
 
     // --- listeler ------------------------------------------------------------------------------
 
-    data class YtList(val id: String, val name: String)
+    data class YtList(val id: String, val name: String, val thumb: String = "")
 
     /** Kitaplıktaki listeler (kendi oluşturdukların + kaydettiklerin) ve beğenilenler. */
     fun playlists(): List<YtList> {
@@ -192,7 +192,7 @@ object YtAccount {
                 val bid = first(it.optJSONObject("navigationEndpoint"), "browseEndpoint")?.optString("browseId") ?: continue
                 if (!bid.startsWith("VL")) continue
                 val id = bid.removePrefix("VL")
-                out[id] = YtList(id, text(it.optJSONObject("title")).ifBlank { "liste" })
+                out[id] = YtList(id, text(it.optJSONObject("title")).ifBlank { "liste" }, lastThumb(it.optJSONObject("thumbnailRenderer")))
             }
             val token = first(r, "continuationCommand")?.optString("token")?.ifEmpty { null }
                 ?: first(r, "nextContinuationData")?.optString("continuation")?.ifEmpty { null }
@@ -255,6 +255,37 @@ object YtAccount {
         val arr = JSONArray()
         songs.forEach { arr.put(it.uiJson()) }
         return JSONObject().put("name", name ?: "liste").put("songs", arr)
+    }
+
+    // --- sanatçı ------------------------------------------------------------------------------
+
+    /** Sanatçı sayfası: {name, thumb, songs:[…], lists:[albüm/tekli…], all: "tüm şarkılar" liste kimliği}. */
+    fun artist(id: String): JSONObject {
+        val r = post("browse", JSONObject().put("browseId", id))
+        val head = first(r, "musicImmersiveHeaderRenderer") ?: first(r, "musicVisualHeaderRenderer")
+            ?: first(r, "musicResponsiveHeaderRenderer")
+        val name = text(head?.optJSONObject("title")).ifBlank { "sanatçı" }
+        val songs = JSONArray()
+        var allId: String? = null
+        first(r, "musicShelfRenderer")?.let { shelf ->
+            for (it in all(shelf, "musicResponsiveListItemRenderer")) song(it)?.let { s -> songs.put(s.uiJson()) }
+            // "Tümünü göster" → tüm şarkılar listesi
+            allId = first(shelf.optJSONObject("title") ?: shelf.optJSONObject("bottomEndpoint"), "browseEndpoint")
+                ?.optString("browseId")?.takeIf { it.startsWith("VL") }?.removePrefix("VL")
+                ?: first(shelf.optJSONObject("bottomEndpoint"), "browseEndpoint")?.optString("browseId")
+                    ?.takeIf { it.startsWith("VL") }?.removePrefix("VL")
+        }
+        val lists = JSONArray()
+        for (sh in all(r, "musicCarouselShelfRenderer")) {
+            val contents = sh.optJSONArray("contents") ?: continue
+            for (i in 0 until contents.length()) {
+                contents.optJSONObject(i)?.optJSONObject("musicTwoRowItemRenderer")?.let { tw ->
+                    card(tw)?.takeIf { it.optString("kind") == "list" }?.let { lists.put(it) }
+                }
+            }
+        }
+        return JSONObject().put("name", name).put("thumb", lastThumb(head)).put("songs", songs)
+            .put("lists", lists).put("all", allId ?: JSONObject.NULL)
     }
 
     // --- ana sayfa -----------------------------------------------------------------------------
@@ -356,7 +387,7 @@ object YtAccount {
         try {
             for ((i, l) in lists.withIndex()) {
                 syncing = "${i + 1}/${lists.size} · ${l.name}"
-                songs += syncOne(l.id, l.name)
+                songs += syncOne(l.id, l.name, l.thumb.ifEmpty { null })
             }
         } finally {
             syncing = ""
@@ -367,10 +398,10 @@ object YtAccount {
         return JSONObject().put("lists", lists.size).put("songs", songs)
     }
 
-    fun syncOne(listId: String, name: String?): Int {
+    fun syncOne(listId: String, name: String?, thumb: String? = null): Int {
         val songs = playlistSongs(listId)
         Library.upsertAll(songs)
-        Library.syncPlaylist("yt:$listId", name, songs.map { it.id })
+        Library.syncPlaylist("yt:$listId", name, songs.map { it.id }, thumb)
         return songs.size
     }
 }

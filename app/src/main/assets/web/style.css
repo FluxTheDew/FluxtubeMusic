@@ -592,3 +592,104 @@ input[type="range"].seek::-webkit-slider-thumb { width: 0.85rem; height: 0.85rem
 .app { grid-template-columns: minmax(0, 1fr); width: 100%; }
 .view, .page, #home, .hs { min-width: 0; }
 .chips-row, #home, .home-page > .spinner { flex: none; }
+
+/* ========================================================================== */
+/* --- v3 ------------------------------------------------------------------------ */
+
+/* Alt menü her yerde görünsün: tam ekran sayfalar onun (ve mini çaların) üstünde biter. */
+:root { --chrome: 3.6rem; }
+.over, .sheet { bottom: var(--chrome); }
+.sheet { position: fixed; top: 0; left: 0; right: 0; z-index: 55; }
+.over { top: 0; left: 0; right: 0; inset: 0 0 var(--chrome) 0; }
+
+/* Kitaplık üstü: görünüm düğmesi + küçük ara + yeni */
+.lib-top { display: flex; gap: 0.45rem; align-items: stretch; }
+.lib-mode { flex: 1; display: flex; align-items: center; gap: 0.6rem; padding: 0.7rem 0.9rem; border: 1px solid var(--accent-line); background: var(--accent-soft); font: 700 0.9rem/1 var(--mono); letter-spacing: 0.12em; color: var(--text); text-align: left; }
+.lib-mode span::before { content: "// "; color: var(--red); }
+.lib-mode i { margin-left: auto; font-style: normal; color: var(--red); }
+.lib-mode:active { background: rgba(255, 255, 255, 0.14); }
+.ib { flex: none; width: 2.9rem; display: grid; place-content: center; border: 1px solid var(--line-strong); background: var(--panel-solid); font: 1.1rem/1 var(--mono); color: var(--text); }
+.ib:active, .ib[aria-pressed="true"] { border-color: var(--red-line); color: var(--red); }
+
+/* Ayarlar menüsü */
+.set-menu { display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--panel); }
+.set-menu button { display: flex; align-items: center; gap: 0.85rem; padding: 0.95rem 1rem; border-top: 1px solid var(--line); text-align: left; }
+.set-menu button:first-child { border-top: none; }
+.set-menu button:active { background: var(--hover); }
+.set-menu .g { width: 1.6rem; text-align: center; font: 1rem/1 var(--mono); color: var(--red); }
+.set-menu .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.set-menu b { font: 600 0.92rem/1.2 var(--mono); color: var(--text); }
+.set-menu small { font: 0.74rem/1.3 var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-menu i { font-style: normal; color: var(--text-3); font: 1.2rem/1 var(--mono); }
+.set-menu .dot { width: 6px; height: 6px; background: var(--red); display: inline-block; margin-left: 0.4rem; vertical-align: 0.15em; animation: blink 1.2s steps(2) infinite; }
+
+/* Animasyon ayar satırları */
+.an-row { padding: 0.75rem 0; border-top: 1px solid var(--line); }
+.an-row:first-child { border-top: none; }
+.an-row .head { display: flex; align-items: center; gap: 0.75rem; }
+.an-row .n { flex: 1; font: 0.9rem/1.3 var(--mono); }
+.an-row .d { font-size: 0.78rem; color: var(--text-3); margin: 0.15rem 0 0.3rem; }
+.an-row .val { font: 0.8rem/1 var(--mono); color: var(--red); min-width: 3.2em; text-align: right; }
+.an-row.is-off input { opacity: 0.35; pointer-events: none; }
+.an-row .demo { margin-top: 0.3rem; }
+
+/* Liste sayfası başlığı: kapak */
+.sheet-hero { display: flex; gap: 0.9rem; align-items: flex-end; padding: 1rem 1rem 0; }
+.sheet-hero:empty { display: none; }
+.sheet-hero .art { width: 7.5rem; height: 7.5rem; }
+.sheet-hero .art::after { content: "≡"; font-size: 2rem; }
+.sheet-hero .t { min-width: 0; flex: 1; }
+.sheet-hero .nm { font: 700 1.1rem/1.3 var(--mono); word-break: break-word; }
+.sheet-hero .ar { font: 0.75rem/1.4 var(--mono); color: var(--text-3); margin-top: 0.3rem; }
+.sheet-hero .btn { margin-top: 0.6rem; padding: 0.45rem 0.6rem; }
+
+/* Sola-sağa kaydır → sıradaki: satırın altında kırmızı ipucu */
+.list .row, .hs-rows .row { touch-action: pan-y; }
+.row.is-swiping { transition: none; z-index: 2; }
+.row.swipe-back { transition: transform 0.18s ease-out; }
+.swipe-hint { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 1rem; font: 700 0.78rem/1 var(--mono); letter-spacing: 0.1em; color: var(--red); background: var(--red-soft); pointer-events: none; z-index: 0; width: 100%; }
+.swipe-hint.is-go { background: var(--red); color: #000; }
+.row.is-swiping .art, .row.is-swiping .t, .row.is-swiping .num, .row.is-swiping button, .row.is-swiping .handle { position: relative; z-index: 1; }
+.row.is-swiping { background: var(--bg-0); }
+
+/* Çaları aşağı çekerek kapat */
+#player.is-pull { transition: none; }
+#player.pull-back { transition: transform 0.2s ease-out; }
+
+/* --- animasyonlar (süreler ayarlardan; kapalıysa 0ms) ------------------------------------ */
+
+:root { --t-tab: 200ms; --t-over: 260ms; --t-menu: 220ms; --t-modal: 170ms; --t-toast: 180ms; }
+
+.view.is-active { animation: a-tab var(--t-tab) ease-out both; }
+@keyframes a-tab { from { opacity: 0; transform: translateY(10px); } }
+
+.over.a-in, .sheet.a-in { animation: a-right var(--t-over) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.over.a-out, .sheet.a-out { animation: a-right-out var(--t-over) ease-in both; }
+#player.a-in { animation-name: a-up; }
+#player.a-out { animation-name: a-up-out; }
+@keyframes a-right { from { transform: translateX(100%); opacity: 0.4; } }
+@keyframes a-right-out { to { transform: translateX(100%); opacity: 0.4; } }
+@keyframes a-up { from { transform: translateY(100%); } }
+@keyframes a-up-out { to { transform: translateY(100%); } }
+
+.sp.a-in { animation: a-sub var(--t-over) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.set-menu.a-in { animation: a-sub-back var(--t-over) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes a-sub { from { transform: translateX(40px); opacity: 0; } }
+@keyframes a-sub-back { from { transform: translateX(-40px); opacity: 0; } }
+
+.scrim { animation: a-fade var(--t-menu) ease-out both; }
+.scrim .menu { animation: a-up var(--t-menu) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.scrim.a-out { animation: a-fade-out var(--t-menu) ease-in both; }
+.scrim.a-out .menu { animation: a-up-out var(--t-menu) ease-in both; }
+@keyframes a-fade { from { opacity: 0; } }
+@keyframes a-fade-out { to { opacity: 0; } }
+
+.modal { animation: a-fade var(--t-modal) ease-out both; }
+.modal .modal-box { animation: a-pop var(--t-modal) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.modal.a-out { animation: a-fade-out var(--t-modal) ease-in both; }
+@keyframes a-pop { from { transform: scale(0.92); opacity: 0; } }
+
+.toast { transition: opacity var(--t-toast), transform var(--t-toast); }
+.list.a-sw { animation: a-tab var(--t-tab) ease-out both; }
+#player .over-head, #player .np { touch-action: none; }
+.toast { bottom: calc(var(--chrome) + 0.7rem); }

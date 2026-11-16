@@ -89,10 +89,13 @@ data class Playlist(
     val songs: MutableList<String>,
     val createdAt: Long,
     val src: String? = null,
+    /** YouTube'daki liste kapağı (uzak adres). Kendi seçtiğin resim covers/<id>.jpg. */
+    val thumb: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("songs", JSONArray(songs)).put("createdAt", createdAt)
         .put("src", src ?: JSONObject.NULL)
+        .put("thumb", thumb ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(o: JSONObject): Playlist {
@@ -101,6 +104,7 @@ data class Playlist(
                 o.getString("id"), o.optString("name", "liste"),
                 MutableList(arr.length()) { arr.getString(it) }, o.optLong("createdAt"),
                 if (o.isNull("src")) null else o.optString("src").ifEmpty { null },
+                if (o.isNull("thumb")) null else o.optString("thumb").ifEmpty { null },
             )
         }
     }
@@ -114,6 +118,8 @@ object Library {
         private set
     lateinit var artDir: File
         private set
+    lateinit var coverDir: File
+        private set
     private val writer = Executors.newSingleThreadExecutor()
 
     /** Her değişiklikte artar; arayüz yeniden çizmesi gerekip gerekmediğini buradan anlar. */
@@ -124,6 +130,7 @@ object Library {
         store = File(ctx.filesDir, "library.json")
         musicDir = File(ctx.filesDir, "music").apply { mkdirs() }
         artDir = File(ctx.filesDir, "art").apply { mkdirs() }
+        coverDir = File(ctx.filesDir, "covers").apply { mkdirs() }
         load()
     }
 
@@ -265,15 +272,15 @@ object Library {
     }
 
     /** Hesaptan gelen listeyi oluştur ya da (aynı kaynaktan) güncelle. */
-    fun syncPlaylist(src: String, name: String?, ids: List<String>): String {
+    fun syncPlaylist(src: String, name: String?, ids: List<String>, thumb: String? = null): String {
         val id = synchronized(this) {
             val old = lists.values.firstOrNull { it.src == src }
             if (old != null) {
-                lists[old.id] = old.copy(name = name?.ifBlank { null } ?: old.name, songs = ids.toMutableList())
+                lists[old.id] = old.copy(name = name?.ifBlank { null } ?: old.name, songs = ids.toMutableList(), thumb = thumb ?: old.thumb)
                 old.id
             } else {
                 val nid = UUID.randomUUID().toString().take(8)
-                lists[nid] = Playlist(nid, name ?: "liste", ids.toMutableList(), System.currentTimeMillis(), src)
+                lists[nid] = Playlist(nid, name ?: "liste", ids.toMutableList(), System.currentTimeMillis(), src, thumb)
                 nid
             }
         }
@@ -291,6 +298,12 @@ object Library {
     }
 
     // --- oynatıcı için ----------------------------------------------------------
+
+    /** Kendi seçtiğin liste kapağı. */
+    fun coverFile(pid: String): File = File(coverDir, pid.replace('/', '_') + ".jpg")
+
+    /** Arayüz yeniden çizsin (dosya değişti ama kayıt değişmedi). */
+    fun bump() { rev++ }
 
     fun artFile(id: String): File = File(artDir, id.replace(':', '_').replace('/', '_') + ".jpg")
 

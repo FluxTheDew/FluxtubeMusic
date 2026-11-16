@@ -42,6 +42,7 @@
           <button type="button" data-f="songs" aria-pressed="true">ŞARKI</button>
           <button type="button" data-f="videos" aria-pressed="false">VİDEO</button>
           <button type="button" data-f="albums" aria-pressed="false">ALBÜM</button>
+          <button type="button" data-f="artists" aria-pressed="false">SANATÇI</button>
           <button type="button" data-f="playlists" aria-pressed="false">LİSTE</button>
         </div>
         <div class="spinner" id="s-spin"></div>
@@ -58,26 +59,20 @@
     <!-- KİTAPLIK -->
     <section class="view" data-view="lib">
       <div class="page">
-        <div class="seg" id="lib-mode">
-          <button type="button" data-mode="dl" aria-pressed="true">İNDİRİLEN</button>
-          <button type="button" data-mode="all" aria-pressed="false">TÜMÜ</button>
-          <button type="button" data-mode="liked" aria-pressed="false">BEĞENİ</button>
-          <button type="button" data-mode="lists" aria-pressed="false">LİSTELER</button>
+        <div class="lib-top">
+          <button class="lib-mode" type="button" id="lib-mode" title="dokun: sonraki görünüm"><span id="lib-mode-name">LİSTELER</span><i>⇄</i></button>
+          <button class="ib" type="button" id="lib-find" aria-label="ara">⌕</button>
+          <button class="ib" type="button" id="lib-new" aria-label="yeni">＋</button>
         </div>
-        <label class="search" id="lib-search">
+        <label class="search" id="lib-search" hidden>
           <span class="ic" aria-hidden="true">&gt;</span>
-          <input id="lib-q" type="search" placeholder="kitaplıkta ara (internetsiz çalışır)" spellcheck="false" autocomplete="off" />
-          <button type="button" id="lib-q-x" hidden>✕</button>
+          <input id="lib-q" type="search" placeholder="ara (internetsiz çalışır)" spellcheck="false" autocomplete="off" />
+          <button type="button" id="lib-q-x">✕</button>
         </label>
         <div class="bar" id="lib-bar">
           <button class="btn btn-solid grow" type="button" id="lib-play">▶ HEPSİNİ ÇAL</button>
           <button class="btn" type="button" id="lib-shuf">⤮ KARIŞIK</button>
           <button class="btn" type="button" id="lib-add">＋ SIRAYA</button>
-        </div>
-        <div class="bar" id="lists-bar" hidden>
-          <button class="btn grow" type="button" id="pl-new">＋ YENİ LİSTE</button>
-          <button class="btn grow" type="button" id="pl-link">⇣ LİNKTEN AL</button>
-          <button class="btn" type="button" id="pl-sync" hidden>↻ YT</button>
         </div>
         <div class="sec" id="lib-sec"></div>
         <div class="list" id="lib-list"></div>
@@ -147,11 +142,21 @@
   <div class="over" id="settings" hidden>
     <div class="over-head">
       <button class="btn btn-ghost" type="button" id="settings-close">←</button>
-      <h3>AYARLAR</h3>
+      <h3 id="settings-title">AYARLAR</h3>
       <span class="ver" id="ver"></span>
     </div>
       <div class="page">
-        <div class="panel" id="acct-panel">
+        <div class="set-menu" id="set-menu">
+          <button type="button" data-open="acct"><span class="g">◉</span><span class="t"><b>Hesap</b><small id="sm-acct">YouTube Music girişi, eşitleme</small></span><i>›</i></button>
+          <button type="button" data-open="play"><span class="g">▶</span><span class="t"><b>Çalma</b><small>dokununca ne olsun, internetsizken</small></span><i>›</i></button>
+          <button type="button" data-open="dl"><span class="g">↓</span><span class="t"><b>İndirme</b><small id="sm-dl">kalite, otomatik indirme, depolama</small></span><i>›</i></button>
+          <button type="button" data-open="local"><span class="g">◆</span><span class="t"><b>Yerel müzik</b><small>telefondaki dosyalar</small></span><i>›</i></button>
+          <button type="button" data-open="anim"><span class="g">≈</span><span class="t"><b>Animasyonlar</b><small>sayfa, menü, pencere geçişleri</small></span><i>›</i></button>
+          <button type="button" data-open="upd"><span class="g">⇡</span><span class="t"><b>Güncelleme</b><small id="sm-upd">GitHub'dan yeni sürüm</small></span><i>›</i></button>
+          <button type="button" data-open="how"><span class="g">?</span><span class="t"><b>Nasıl çalışır</b><small>sıra, indirme, internetsiz kullanım</small></span><i>›</i></button>
+          <button type="button" data-open="log"><span class="g">&gt;_</span><span class="t"><b>Olaylar</b><small>hata kayıtları</small></span><i>›</i></button>
+        </div>
+        <div class="panel sp" data-sp="acct" hidden id="acct-panel">
           <div class="panel-head"><h2>HESAP</h2><div class="right"><span class="badge" id="acct-badge">GİRİŞ YOK</span></div></div>
           <div id="acct-out">
             <p class="panel-desc">YouTube Music hesabınla giriş yap: kitaplığındaki listeler ve beğendiğin şarkılar buraya gelsin, indirip internetsiz dinle.
@@ -172,7 +177,7 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel sp" data-sp="play" hidden>
           <div class="panel-head"><h2>ÇALMA</h2></div>
           <div class="opt col">
             <div class="head"><div class="n">Şarkıya dokununca</div></div>
@@ -189,7 +194,7 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel sp" data-sp="dl" hidden>
           <div class="panel-head"><h2>İNDİRME</h2><div class="right"><span class="badge" id="st-bytes">0 MB</span></div></div>
           <div class="opt col">
             <div class="head"><div class="n">Ses kalitesi</div></div>
@@ -221,13 +226,19 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel sp" data-sp="local" hidden>
           <div class="panel-head"><h2>YEREL MÜZİK</h2><div class="right"><span class="badge" id="st-local">0</span></div></div>
           <p class="panel-desc">Telefondaki mp3 / flac / m4a dosyalarını kitaplığa ekler. Bunlar her zaman internetsiz çalar.</p>
           <button class="btn" type="button" id="scan">TELEFONU TARA</button>
         </div>
 
-        <div class="panel" id="upd-panel">
+        <div class="panel sp" data-sp="anim" hidden>
+          <div class="panel-head"><h2>ANİMASYONLAR</h2><div class="right"><button class="btn btn-ghost" type="button" id="anim-reset">VARSAYILAN</button></div></div>
+          <p class="panel-desc">Her birini ayrı aç / kapat, hızını ayarla. Sadece bu telefonda saklanır.</p>
+          <div id="anim-list"></div>
+        </div>
+
+        <div class="panel sp" data-sp="upd" hidden id="upd-panel">
           <div class="panel-head"><h2>GÜNCELLEME</h2><div class="right"><span class="badge red" id="upd-badge" hidden>YENİ</span></div></div>
           <p class="panel-desc" id="upd-info">kurulu sürüm: —</p>
           <div class="upd-bar" id="upd-bar" hidden><i id="upd-fill"></i></div>
@@ -239,7 +250,7 @@
           <p class="note" style="margin-top:.8rem">Yeni sürüm GitHub'dan çekilir ve mevcut uygulamanın üstüne kurulur: kitaplık, listeler, sıra ve indirilen şarkılar yerinde kalır.</p>
         </div>
 
-        <div class="panel">
+        <div class="panel sp" data-sp="how" hidden>
           <div class="panel-head"><h2>NASIL ÇALIŞIR</h2></div>
           <ul class="how">
             <li data-n="01">Sıra, listeler ve kitaplık tamamen telefonda tutulur. İnternet olmadan da sıraya ekleyip çıkarabilir, sürükleyip sıralayabilirsin.</li>
@@ -250,7 +261,7 @@
           </ul>
         </div>
 
-        <div class="panel">
+        <div class="panel sp" data-sp="log" hidden>
           <div class="panel-head"><h2>OLAYLAR</h2><div class="right"><button class="btn btn-ghost" type="button" id="log-clear">TEMİZLE</button></div></div>
           <div class="term term-mini" id="term"></div>
         </div>
@@ -264,6 +275,7 @@
       <h3 id="sheet-title">LİSTE</h3>
       <button class="btn btn-ghost" type="button" id="sheet-more">⋯</button>
     </div>
+    <div class="sheet-hero" id="sheet-hero"></div>
     <div class="sec" style="padding:.8rem 1rem .5rem" id="sheet-sec"></div>
     <div class="bar" id="sheet-bar">
       <button class="btn btn-solid grow" type="button" id="sh-play">▶ ÇAL</button>

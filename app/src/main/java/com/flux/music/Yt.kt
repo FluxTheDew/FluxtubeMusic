@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.schabi.newpipe.extractor.Image
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.NewPipe
+import org.schabi.newpipe.extractor.channel.ChannelInfoItem
 import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.localization.ContentCountry
@@ -76,6 +77,7 @@ object Yt {
             "videos" -> "music_videos"
             "albums" -> "music_albums"
             "playlists" -> "music_playlists"
+            "artists" -> "music_artists"
             else -> "music_songs"
         }
         val ex = yt.getSearchExtractor(q, listOf(content), "")
@@ -93,6 +95,12 @@ object Yt {
             .put("title", item.name)
             .put("artist", cleanArtist(item.uploaderName ?: ""))
             .put("count", item.streamCount)
+            .put("thumb", bestThumb(item.thumbnails))
+        is ChannelInfoItem -> JSONObject()
+            .put("kind", "artist")
+            .put("artist", item.url.substringAfter("/channel/").substringBefore('?').substringBefore('/'))
+            .put("title", item.name)
+            .put("subs", item.subscriberCount)
             .put("thumb", bestThumb(item.thumbnails))
         else -> null
     }
