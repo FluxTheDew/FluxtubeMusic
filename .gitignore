@@ -1,0 +1,12 @@
+.gradle/
+build/
+/app/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+*.keystore
+*.jks
+# Güncellemelerin eskisinin üstüne kurulabilmesi için sabit imza anahtarı depoda.
+!keystore/fluxtube.p12

@@ -1,0 +1,71 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      # İsteğe bağlı: kendi imza anahtarın (base64). Yoksa depodaki
+      # keystore/fluxtube.p12 kullanılır; ikisi de her sürümde aynı imzayı verir.
+      KEYSTORE_B64: ${{ secrets.FLUX_KEYSTORE_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: İmza anahtarı (sır varsa)
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/flux.p12"
+          echo "FLUX_KEYSTORE=$RUNNER_TEMP/flux.p12" >> "$GITHUB_ENV"
+
+      - name: Testler
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: APK
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Dosya adı
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/FluxTube-Music.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FluxTube-Music-apk
+          path: out/*.apk
+
+      - name: Sürüm notu
+        run: |
+          {
+            echo '**İndir:** aşağıdaki `FluxTube-Music.apk`'
+            echo
+            git log -1 --format=%B | grep -vE '^(Co-Authored-By|Claude-Session):' | sed 's/</\&lt;/g'
+          } > notes.md
+
+      # Ana dala her push yeni bir sürüm: Releases'ta "Latest" hep son APK,
+      # uygulamadaki AYAR → GÜNCELLEME de oradan çeker.
+      - name: Sürüm yayınla
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref_name == github.event.repository.default_branch || startsWith(github.ref, 'refs/tags/v'))
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          name: FluxTube Music ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body_path: notes.md
+          files: out/FluxTube-Music.apk
