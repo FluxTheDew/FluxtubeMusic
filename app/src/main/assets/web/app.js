@@ -456,6 +456,7 @@
     const isLists = libMode === "lists";
     $("#lib-bar").hidden = isLists;
     $("#lists-bar").hidden = !isLists;
+    $("#pl-sync").hidden = !acct.loggedIn;
     $("#lib-q").placeholder = isLists ? "listelerde ara" : "kitaplıkta ara (internetsiz çalışır)";
     $("#lib-q-x").hidden = !$("#lib-q").value;
     const el = $("#lib-list");
@@ -472,7 +473,7 @@
       el.innerHTML = shown.map((p) =>
         '<div class="row pl-row" data-pl="' + esc(p.id) + '">' +
         (p.cover ? artHtml({ id: p.cover }, false) : '<div class="art"></div>') +
-        '<div class="t"><div class="nm">' + esc(p.name) + '</div><div class="ar">' + p.count + " şarkı · " +
+        '<div class="t"><div class="nm">' + esc(p.name) + '</div><div class="ar">' + (p.yt ? '<span class="yt-tag">YT</span> · ' : "") + p.count + " şarkı · " +
         (p.dl === p.count && p.count ? '<span class="dl">↓ hepsi indirili</span>' : p.dl + " indirili") + "</div></div>" +
         '<button class="more" type="button" data-act="plmore">⋯</button></div>').join("");
       return;
@@ -642,6 +643,11 @@
         { g: "↳", t: "Sıradaki olarak ekle", fn: () => enqueue(p.songs, "next") },
         { g: "＋", t: "Sıranın sonuna ekle", fn: () => enqueue(p.songs, "end") },
         { g: "↓", t: "Hepsini indir", fn: () => { const n = FM.download(JSON.stringify(p.songs)); toast(n ? "↓ " + n + " şarkı indiriliyor" : "hepsi zaten indirili"); } },
+        p.yt && { g: "↻", t: "YouTube'dan tazele", sub: "hesaptaki son hali", fn: () => {
+          if (!S.online) { toast("internet yok", true); return; }
+          toast("↻ tazeleniyor…");
+          call("syncList", pid).then((d) => { toast("↻ " + d.songs + " şarkı"); reloadSheet(); }).catch((e) => toast(e.message, true));
+        } },
         { g: "✎", t: "Yeniden adlandır", fn: () => ask("LİSTEYİ YENİDEN ADLANDIR", p.name, (name) => { FM.plRename(pid, name); reloadSheet(); renderLib(); }) },
         { g: "✕", t: "Listeyi sil", danger: true, fn: () => confirmDo("“" + p.name + "” silinsin mi? Şarkılar kitaplıkta kalır.", () => { FM.plDelete(pid); if (sh && sh.id === pid) closeSheet(); renderLib(); toast("liste silindi"); }) },
       ],
@@ -833,6 +839,61 @@
     spins.set(node, { t1: setInterval(tick, 110), t2: setInterval(nextVerb, 1800) });
   }
 
+  // --- HESAP ------------------------------------------------------------------------------------------
+
+  let acct = J(FM.account(), { loggedIn: false });
+  let arev = -1;
+  let syncBusy = false;
+
+  function renderAccount() {
+    $("#acct-out").hidden = !!acct.loggedIn;
+    $("#acct-in").hidden = !acct.loggedIn;
+    $("#acct-badge").textContent = acct.loggedIn ? "BAĞLI" : "GİRİŞ YOK";
+    $("#acct-badge").className = "badge" + (acct.loggedIn ? " red" : "");
+    if (!acct.loggedIn) return;
+    $("#acct-name").textContent = acct.name || "YouTube hesabı";
+    const when = acct.syncedAt ? "son eşitleme " + new Date(acct.syncedAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "henüz eşitlenmedi";
+    $("#acct-sub").textContent = (acct.handle ? acct.handle + " · " : "") + (S.syncing ? "eşitleniyor " + S.syncing : when);
+    const ph = $("#acct-photo");
+    const want = acct.photo || "";
+    if (ph.dataset.src !== want) {
+      ph.dataset.src = want;
+      ph.innerHTML = want ? '<img src="' + esc(want) + '" onerror="this.remove()" alt="">' : "";
+    }
+    $("#acct-sync").disabled = syncBusy;
+  }
+
+  function syncAccount() {
+    if (syncBusy) return;
+    if (!S.online) { toast("internet yok", true); return; }
+    syncBusy = true;
+    renderAccount();
+    spinner($("#acct-spin"), true);
+    call("syncAccount").then((d) => {
+      toast("↻ " + d.lists + " liste · " + d.songs + " şarkı eşitlendi");
+      libMode = "lists";
+      if (tab === "lib") renderLib();
+    }).catch((e) => toast("eşitlenemedi: " + e.message, true)).finally(() => {
+      syncBusy = false;
+      spinner($("#acct-spin"), false);
+      acct = J(FM.account(), acct);
+      renderAccount();
+    });
+  }
+
+  $("#acct-login").addEventListener("click", () => {
+    if (!S.online) { toast("internet yok", true); return; }
+    FM.login();
+  });
+  $("#acct-logout").addEventListener("click", () => confirmDo("YouTube hesabından çıkılsın mı? Eşitlenmiş listeler ve indirilenler telefonda kalır.", () => {
+    FM.logout();
+    acct = J(FM.account(), { loggedIn: false });
+    renderAccount();
+    toast("çıkış yapıldı");
+  }));
+  $("#acct-sync").addEventListener("click", syncAccount);
+  $("#pl-sync").addEventListener("click", syncAccount);
+
   // --- AYAR ------------------------------------------------------------------------------------------
 
   function renderPrefs() {
@@ -983,6 +1044,16 @@
     } else {
       markQueue();
     }
+    if (s.arev !== arev) {
+      const was = acct.loggedIn;
+      arev = s.arev;
+      acct = J(FM.account(), acct);
+      renderAccount();
+      if (tab === "lib") renderLib();
+      if (!was && acct.loggedIn) { toast("◉ giriş yapıldı — kitaplık eşitleniyor"); syncAccount(); }
+    } else if (tab === "settings" && acct.loggedIn) {
+      renderAccount();
+    }
     renderConn();
     renderNow();
     renderMini();
@@ -1041,7 +1112,7 @@
       shuffleUpcoming: () => { qr++; }, saveQueue: () => "p2",
       library: () => JSON.stringify(songs), remember: () => 1, like: () => { lr++; }, deleteDownload: () => {}, forget: () => {},
       stats: () => JSON.stringify({ songs: songs.length, downloaded: 8, local: 0, bytes: 52e6 }),
-      playlists: () => JSON.stringify(lists.map((p) => ({ id: p.id, name: p.name, count: p.songs.length, dl: 2, cover: p.songs[0] }))),
+      playlists: () => JSON.stringify(lists.map((p) => ({ id: p.id, name: p.name, count: p.songs.length, dl: 2, cover: p.songs[0], yt: p.id === "p1" }))),
       playlist: (id) => { const p = lists.find((x) => x.id === id); return p ? JSON.stringify({ id: p.id, name: p.name, songs: p.songs.map(find) }) : "null"; },
       createPlaylist: () => "p3", addToPlaylist: () => 1, plRemove: () => {}, plMove: () => {}, plRename: () => {}, plDelete: () => {},
       download: () => 1,
@@ -1052,6 +1123,10 @@
       openList: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "albüm", songs: songs.slice(2, 8) } })), 600),
       scanLocal: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { count: 0 } })), 300),
       prefs: () => JSON.stringify({ quality: "high", autoDl: "wifi", tap: "now", skipOffline: "true", dlWifiOnly: "false" }),
+      account: () => JSON.stringify({ loggedIn: true, name: "Flux", handle: "@fluxthedew", photo: "", syncedAt: Date.now() - 36e5 }),
+      login: () => {}, logout: () => {},
+      syncAccount: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { lists: 4, songs: 212 } })), 1500),
+      syncList: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { songs: 40 } })), 600),
       setPref: () => {}, checkUpdate: () => {}, installUpdate: () => {},
       logs: () => "[]", clearLogs: () => {},
     };

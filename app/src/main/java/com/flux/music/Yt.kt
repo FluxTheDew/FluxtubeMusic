@@ -162,7 +162,7 @@ object Yt {
     }
 
     /** YT Music kapakları (googleusercontent) boyut parametresiyle geliyor: büyüt. */
-    private fun upscale(u: String): String =
+    fun upscale(u: String): String =
         if (u.contains("googleusercontent.com") || u.contains("ggpht.com"))
             u.replace(Regex("=w\\d+-h\\d+[^&]*$"), "=w544-h544-l90-rj")
         else u

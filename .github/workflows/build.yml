@@ -14,8 +14,8 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     env:
-      # İsteğe bağlı: kendi imza anahtarın (base64). Yoksa depodaki
-      # keystore/fluxtube.p12 kullanılır; ikisi de her sürümde aynı imzayı verir.
+      # İmza anahtarı (base64) depo sırrında. Her sürüm aynı imzayla çıkmalı ki
+      # güncelleme eskisinin üstüne kurulsun. Şifresi sabit; dosya olmadan işe yaramaz.
       KEYSTORE_B64: ${{ secrets.FLUX_KEYSTORE_B64 }}
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +32,14 @@ jobs:
         run: |
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/flux.p12"
           echo "FLUX_KEYSTORE=$RUNNER_TEMP/flux.p12" >> "$GITHUB_ENV"
+
+      - name: Hangi imza?
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "::notice::İmza: sabit anahtar (FLUX_KEYSTORE_B64)"
+          else
+            echo "::warning::FLUX_KEYSTORE_B64 sırrı yok: APK geçici anahtarla imzalandı, sürüm YAYINLANMAYACAK"
+          fi
 
       - name: Testler
         run: ./gradlew --no-daemon testDebugUnitTest
@@ -60,7 +68,7 @@ jobs:
       # Ana dala her push yeni bir sürüm: Releases'ta "Latest" hep son APK,
       # uygulamadaki AYAR → GÜNCELLEME de oradan çeker.
       - name: Sürüm yayınla
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref_name == github.event.repository.default_branch || startsWith(github.ref, 'refs/tags/v'))
+        if: env.KEYSTORE_B64 != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref_name == github.event.repository.default_branch || startsWith(github.ref, 'refs/tags/v'))
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v0.1.{0}', github.run_number) }}

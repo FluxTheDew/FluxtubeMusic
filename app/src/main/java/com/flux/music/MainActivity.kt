@@ -201,6 +201,8 @@ class MainActivity : Activity() {
             .put("drev", Downloads.rev)
             .put("dlActive", Downloads.active())
             .put("online", Net.online(this))
+            .put("arev", YtAccount.rev)
+            .put("syncing", YtAccount.syncing)
             .put("update", JSONObject()
                 .put("phase", Updater.phase)
                 .put("current", Updater.current(this))
@@ -427,6 +429,7 @@ class MainActivity : Activity() {
             for (p in Library.playlists()) {
                 val songs = p.songs.mapNotNull { Library.get(it) }
                 put(JSONObject().put("id", p.id).put("name", p.name).put("count", songs.size)
+                    .put("yt", p.src != null)
                     .put("dl", songs.count { it.offline })
                     .put("cover", songs.firstOrNull()?.id ?: JSONObject.NULL))
             }
@@ -435,7 +438,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun playlist(id: String): String {
             val p = Library.playlist(id) ?: return "null"
-            return JSONObject().put("id", p.id).put("name", p.name)
+            return JSONObject().put("id", p.id).put("name", p.name).put("yt", p.src != null)
                 .put("songs", songsJson(p.songs.mapNotNull { Library.get(it) })).toString()
         }
 
@@ -485,6 +488,20 @@ class MainActivity : Activity() {
                 pendingScan = req
                 requestPermissions(arrayOf(perm), REQ_AUDIO)
             }
+        }
+
+        // YouTube hesabı
+        @JavascriptInterface fun account(): String = YtAccount.json().toString()
+        @JavascriptInterface fun login() = main.post { startActivity(android.content.Intent(this@MainActivity, LoginActivity::class.java)) }
+        @JavascriptInterface fun logout() = YtAccount.logout()
+        @JavascriptInterface fun syncAccount(req: Int) = async(req) { YtAccount.syncAll() }
+
+        /** Hesaptan gelmiş tek bir listeyi tazele. */
+        @JavascriptInterface
+        fun syncList(req: Int, pid: String) = async(req) {
+            val p = Library.playlist(pid) ?: throw java.io.IOException("liste yok")
+            val src = p.src?.removePrefix("yt:") ?: throw java.io.IOException("bu liste YouTube'dan gelmemiş")
+            JSONObject().put("songs", YtAccount.syncOne(src, null))
         }
 
         // ayarlar

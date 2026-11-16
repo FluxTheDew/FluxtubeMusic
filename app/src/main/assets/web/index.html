@@ -81,6 +81,7 @@
         <div class="bar" id="lists-bar" hidden>
           <button class="btn grow" type="button" id="pl-new">＋ YENİ LİSTE</button>
           <button class="btn grow" type="button" id="pl-link">⇣ LİNKTEN AL</button>
+          <button class="btn" type="button" id="pl-sync" hidden>↻ YT</button>
         </div>
         <div class="sec" id="lib-sec"></div>
         <div class="list" id="lib-list"></div>
@@ -115,6 +116,27 @@
     <!-- AYAR -->
     <section class="view" data-view="settings">
       <div class="page">
+        <div class="panel" id="acct-panel">
+          <div class="panel-head"><h2>HESAP</h2><div class="right"><span class="badge" id="acct-badge">GİRİŞ YOK</span></div></div>
+          <div id="acct-out">
+            <p class="panel-desc">YouTube Music hesabınla giriş yap: kitaplığındaki listeler ve beğendiğin şarkılar buraya gelsin, indirip internetsiz dinle.
+              Giriş Google'ın kendi sayfasında olur, şifren uygulamaya gelmez.</p>
+            <button class="btn btn-solid" type="button" id="acct-login">GİRİŞ YAP</button>
+          </div>
+          <div id="acct-in" hidden>
+            <div class="acct">
+              <div class="art" id="acct-photo"></div>
+              <div class="t"><div class="nm" id="acct-name">—</div><div class="ar" id="acct-sub"></div></div>
+            </div>
+            <div class="spinner" id="acct-spin"></div>
+            <div class="row-btns">
+              <button class="btn btn-solid" type="button" id="acct-sync">↻ KİTAPLIĞI EŞİTLE</button>
+              <button class="btn btn-danger" type="button" id="acct-logout">ÇIKIŞ</button>
+            </div>
+            <p class="note" style="margin-top:.8rem">Eşitleme YT Music'teki listelerini ve beğenilenleri KİTAPLIK → LİSTELER'e getirir (tekrar eşitleyince günceller, kopyalamaz). İnternetsiz dinlemek için listede ↓ İNDİR.</p>
+          </div>
+        </div>
+
         <div class="panel">
           <div class="panel-head"><h2>ÇALMA</h2></div>
           <div class="opt col">

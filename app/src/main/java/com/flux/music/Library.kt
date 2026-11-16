@@ -77,9 +77,17 @@ data class Song(
     }
 }
 
-data class Playlist(val id: String, val name: String, val songs: MutableList<String>, val createdAt: Long) {
+/** src: YouTube hesabından eşitlenen listelerde "yt:<listeId>" (yeniden eşitlemede bulunur). */
+data class Playlist(
+    val id: String,
+    val name: String,
+    val songs: MutableList<String>,
+    val createdAt: Long,
+    val src: String? = null,
+) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("songs", JSONArray(songs)).put("createdAt", createdAt)
+        .put("src", src ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(o: JSONObject): Playlist {
@@ -87,6 +95,7 @@ data class Playlist(val id: String, val name: String, val songs: MutableList<Str
             return Playlist(
                 o.getString("id"), o.optString("name", "liste"),
                 MutableList(arr.length()) { arr.getString(it) }, o.optLong("createdAt"),
+                if (o.isNull("src")) null else o.optString("src").ifEmpty { null },
             )
         }
     }
@@ -246,6 +255,23 @@ object Library {
     fun createPlaylist(name: String, ids: List<String>): String {
         val id = UUID.randomUUID().toString().take(8)
         synchronized(this) { lists[id] = Playlist(id, name.ifBlank { "liste" }, ids.toMutableList(), System.currentTimeMillis()) }
+        changed()
+        return id
+    }
+
+    /** Hesaptan gelen listeyi oluştur ya da (aynı kaynaktan) güncelle. */
+    fun syncPlaylist(src: String, name: String?, ids: List<String>): String {
+        val id = synchronized(this) {
+            val old = lists.values.firstOrNull { it.src == src }
+            if (old != null) {
+                lists[old.id] = old.copy(name = name?.ifBlank { null } ?: old.name, songs = ids.toMutableList())
+                old.id
+            } else {
+                val nid = UUID.randomUUID().toString().take(8)
+                lists[nid] = Playlist(nid, name ?: "liste", ids.toMutableList(), System.currentTimeMillis(), src)
+                nid
+            }
+        }
         changed()
         return id
     }

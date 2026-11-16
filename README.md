@@ -14,6 +14,7 @@ Resmi uygulamada sıraya ekleme mobilde dağınık; internet yokken indirdiğin 
 - **İnternet yokken** indirilmemiş şarkılar üstü çizili görünür, sırada gelince sessizce atlanır.
 - **Kitaplıkta arama** internetsiz çalışır. YouTube Music araması: şarkı, video, albüm, liste.
 - **Link ile içe aktar:** YouTube / YT Music liste veya şarkı linkini yapıştır, liste olarak kaydet.
+- **YouTube Music hesabı:** Google'ın kendi giriş sayfasıyla giriş (şifre uygulamaya gelmez). Kitaplığındaki listeler ve beğenilenler buraya eşitlenir. Tekrar eşitleyince güncellenir, kopyalanmaz.
 - **Yerel müzik:** telefondaki mp3/flac/m4a dosyaları da aynı kitaplıkta.
 - **Bildirim ve kilit ekranı kontrolleri**, kulaklık tuşları, kulaklık çıkınca durma.
 - **AYAR → GÜNCELLEME:** yeni sürümü GitHub Releases'tan çekip mevcut uygulamanın üstüne kurar. Verilerin silinmez.
@@ -34,12 +35,12 @@ Resmi uygulamada sıraya ekleme mobilde dağınık; internet yokken indirdiğin 
 | `Library.kt` | Şarkılar ve listeler, `library.json`. |
 | `Downloads.kt` | Parça parça (Range) indirme, kaldığı yerden devam. Ön plan servisiyle arka planda sürer. |
 | `Yt.kt` | [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor): arama, liste, akış adresi. Giriş gerekmez. |
+| `YtAccount.kt` / `LoginActivity.kt` | Hesap: Google giriş sayfası → çerezler → music.youtube.com API'si; listeleri ve beğenilenleri çeker. |
 | `Updater.kt` | GitHub Releases'tan güncelleme. |
 
 Her push'ta GitHub Actions APK derler. Ana dala yapılan push yeni bir sürüm yayınlar.
-İmza anahtarı `keystore/fluxtube.p12` (her sürüm aynı imzayla, güncelleme üstüne kurulsun diye).
-İstersen kendi anahtarını base64 olarak `FLUX_KEYSTORE_B64` deposu sırrına koy. Ama anahtar değişirse
-eski kurulumu bir kez kaldırıp yeniden kurman gerekir.
+İmza anahtarı depoda değil: base64 olarak `FLUX_KEYSTORE_B64` deposu sırrında (Settings → Secrets and variables → Actions).
+Her sürüm aynı imzayla çıkar, güncelleme eskisinin üstüne kurulur. Sır yoksa APK yine derlenir ama sürüm yayınlanmaz.
 
 > Not: YouTube'un resmi olmayan arayüzünü kullanır; YouTube bir şeyi değiştirdiğinde arama/akış geçici olarak bozulabilir.
 > Bu durumda `app/build.gradle.kts` içindeki NewPipeExtractor sürümünü yükseltmek genelde yeter. İndirilmiş şarkılar etkilenmez.

@@ -8,6 +8,7 @@ class App : Application() {
         Prefs.init(this)
         Library.init(this)
         Downloads.init(this)
+        YtAccount.init(this)
         Yt.init()
     }
 }

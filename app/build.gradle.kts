@@ -19,27 +19,27 @@ android {
 
     signingConfigs {
         // Her sürüm AYNI anahtarla imzalanmalı, yoksa Android güncellemeyi
-        // eskisinin üstüne kurmaz. Depo sırrı (FLUX_KEYSTORE) varsa o,
-        // yoksa depodaki keystore/fluxtube.p12 kullanılır.
+        // eskisinin üstüne kurmaz. Anahtar depoda değil: GitHub'daki
+        // FLUX_KEYSTORE_B64 sırrından geliyor (CI onu FLUX_KEYSTORE'a yazar).
         create("fixed") {
             val ks = System.getenv("FLUX_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
-                ?: rootProject.file("keystore/fluxtube.p12")
-            storeFile = ks
-            storeType = "pkcs12"
-            storePassword = System.getenv("FLUX_KEYSTORE_PASSWORD") ?: "fluxtube"
-            keyAlias = System.getenv("FLUX_KEY_ALIAS") ?: "fluxtube"
-            keyPassword = System.getenv("FLUX_KEY_PASSWORD") ?: "fluxtube"
+            if (ks != null) {
+                storeFile = ks
+                storeType = "pkcs12"
+                storePassword = System.getenv("FLUX_KEYSTORE_PASSWORD") ?: "fluxtube"
+                keyAlias = System.getenv("FLUX_KEY_ALIAS") ?: "fluxtube"
+                keyPassword = System.getenv("FLUX_KEY_PASSWORD") ?: "fluxtube"
+            }
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("fixed")
-        }
         release {
             // NewPipeExtractor/Rhino yansıma kullanıyor; küçültme onları bozuyor.
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("fixed")
+            // Sır yoksa (yerel derleme) debug anahtarı: kurulur ama güncelleme olarak değil.
+            val fixed = signingConfigs.getByName("fixed")
+            signingConfig = if (fixed.storeFile != null) fixed else signingConfigs.getByName("debug")
         }
     }
 
