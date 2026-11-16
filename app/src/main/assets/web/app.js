@@ -12,6 +12,9 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const FM = window.FM || mockBridge();
+  // Teşhis: Kotlin "başladı / hazır" ve dokunuş sayısını görsün (arayüz açılmazsa teşhis penceresi).
+  try { if (FM.boot) FM.boot("start"); } catch (e) { /* yok */ }
+  document.addEventListener("pointerdown", () => { try { if (FM.touch) FM.touch(); } catch (e) { /* yok */ } }, true);
 
   // --- JS hatası: ekranda kırmızı şerit + OLAYLAR'a kayıt (telefonda hata ayıklamak için) ---------
   function showErr(msg) {
@@ -1305,6 +1308,7 @@
   try { poll(); } catch (e) { showErr(e.message + " (ilk yükleme)"); }
   setInterval(() => { try { poll(); } catch (e) { showErr(e.message); } }, 500);
   renderHome();
+  try { if (FM.boot) FM.boot("ready"); } catch (e) { /* yok */ }
 
   // --- tarayıcıda geliştirme için sahte köprü ----------------------------------------------------------
 

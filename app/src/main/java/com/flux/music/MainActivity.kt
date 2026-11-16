@@ -14,7 +14,13 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.view.MotionEvent
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -57,6 +63,13 @@ class MainActivity : Activity() {
     private var pendingScan = -1
     private val noArt = Collections.synchronizedSet(HashSet<String>())
 
+    // --- teşhis: arayüz açılmazsa / donarsa Android'in kendi penceresiyle göster ---
+    @Volatile private var jsReady = false
+    @Volatile private var jsTouches = 0
+    @Volatile private var lastPong = 0L
+    private var nativeTouches = 0
+    private var diagShown = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,7 +86,21 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = true
             overScrollMode = View.OVER_SCROLL_NEVER
             addJavascriptInterface(Bridge(), "FM")
+            webChromeClient = object : WebChromeClient() {
+                // Sözdizimi hataları dahil: app.js hiç çalışmasa bile burada görünür.
+                override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                    if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR || m.messageLevel() == ConsoleMessage.MessageLevel.WARNING) {
+                        Logbook.add("JS", "${m.message()} @${m.sourceId()?.substringAfterLast('/')}:${m.lineNumber()}")
+                    }
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    Logbook.add("SYS", "sayfa yüklendi, WebView ${webViewVersion()}")
+                    main.postDelayed(watchdog, 6000)
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
                     !request.url.toString().startsWith("file:///android_asset/")
 
@@ -139,7 +166,88 @@ class MainActivity : Activity() {
         }
     }
 
+    private val cornerTaps = ArrayDeque<Long>()
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            nativeTouches++
+            // Sol üst köşeye 1 sn içinde 3 dokunuş: teşhis penceresi (arayüz tepki vermese bile).
+            val d = resources.displayMetrics.density
+            if (ev.x < 90 * d && ev.y < 120 * d) {
+                val now = System.currentTimeMillis()
+                cornerTaps.addLast(now)
+                while (cornerTaps.isNotEmpty() && now - cornerTaps.first() > 1000) cornerTaps.removeFirst()
+                if (cornerTaps.size >= 3) { cornerTaps.clear(); showDiag("Elle açıldı (sol üst köşe).") }
+            }
+            // Android dokunuşu alıyor ama arayüze hiç ulaşmıyorsa.
+            main.postDelayed({
+                if (nativeTouches >= 6 && jsTouches == 0) showDiag("Dokunuşlar arayüze ulaşmıyor.")
+            }, 1500)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun webViewVersion(): String =
+        runCatching { WebView.getCurrentWebViewPackage()?.let { "${it.packageName} ${it.versionName}" } }.getOrNull() ?: "?"
+
+    /** 6 sn'de bir: arayüz hazır mı, JS yanıt veriyor mu? */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (isFinishing || diagShown) return
+            if (!jsReady) {
+                showDiag("Arayüz başlatılamadı (6 sn içinde hazır olmadı).")
+                return
+            }
+            val sent = System.currentTimeMillis()
+            web.evaluateJavascript("1") { lastPong = System.currentTimeMillis() }
+            main.postDelayed({
+                if (!diagShown && !isFinishing && lastPong < sent) showDiag("Arayüz donmuş (JS 4 sn'dir yanıt vermiyor).")
+            }, 4000)
+            main.postDelayed(this, 6000)
+        }
+    }
+
+    private fun showDiag(why: String) {
+        if (diagShown || isFinishing) return
+        diagShown = true
+        Logbook.add("ERR", why)
+        val lines = Logbook.since(0).takeLast(25).joinToString("\n") { "${it.tag} ${it.text}" }
+        val text = buildString {
+            appendLine(why)
+            appendLine()
+            appendLine("sürüm: ${Updater.current(this@MainActivity)} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            appendLine("WebView: ${webViewVersion()}")
+            appendLine("dokunuş: Android $nativeTouches · arayüz $jsTouches · hazır: $jsReady")
+            appendLine()
+            append(lines)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("FluxTube Music · teşhis")
+            .setMessage(text)
+            .setPositiveButton("GÜNCELLE") { _, _ ->
+                Updater.check(this)
+                main.postDelayed(object : Runnable {
+                    override fun run() {
+                        when (Updater.phase) {
+                            "checking" -> main.postDelayed(this, 500)
+                            "available" -> Updater.install(this@MainActivity)
+                            else -> android.widget.Toast.makeText(this@MainActivity, "güncelleme: ${Updater.phase} ${Updater.error ?: ""}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }, 500)
+                diagShown = false
+            }
+            .setNeutralButton("KOPYALA") { _, _ ->
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("teşhis", text))
+                android.widget.Toast.makeText(this, "kopyalandı", android.widget.Toast.LENGTH_SHORT).show()
+                diagShown = false
+            }
+            .setNegativeButton("KAPAT") { _, _ -> diagShown = false }
+            .show()
+    }
+
     override fun onDestroy() {
+        main.removeCallbacks(watchdog)
         web.destroy()
         bg.shutdown()
         super.onDestroy()
@@ -489,6 +597,13 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface fun home(req: Int) = async(req) { YtAccount.home() }
+
+        /** app.js başladı / bitti; teşhis için. */
+        @JavascriptInterface fun boot(stage: String) {
+            Logbook.add("SYS", "arayüz: $stage")
+            if (stage == "ready") jsReady = true
+        }
+        @JavascriptInterface fun touch() { jsTouches++ }
 
         /** Arayüzdeki JS hataları OLAYLAR'a düşsün. */
         @JavascriptInterface fun jsError(msg: String) = Logbook.add("JS", msg.take(400))
