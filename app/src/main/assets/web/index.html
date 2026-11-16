@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>FluxTube Music</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <span class="brand">FLUX<b>::</b>MUSIC</span>
+      <span class="ver" id="ver"></span>
+      <span class="conn" id="conn"><i></i><span>—</span></span>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="now" aria-selected="true"><span class="n">01</span>ÇALAN</button>
+      <button type="button" role="tab" data-tab="lib" aria-selected="false"><span class="n">02</span>KİTAPLIK</button>
+      <button type="button" role="tab" data-tab="search" aria-selected="false"><span class="n">03</span>ARA</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false"><span class="n">04</span>AYAR</button>
+    </nav>
+
+    <!-- ÇALAN + SIRA -->
+    <section class="view is-active" data-view="now">
+      <div class="page" id="now-page">
+        <div class="panel np" id="np">
+          <div class="np-cover"><div class="art" id="np-art"></div></div>
+          <div class="np-meta">
+            <div class="np-title" id="np-title">sıra boş</div>
+            <div class="np-artist" id="np-artist">kitaplıktan ya da aramadan şarkı ekle</div>
+            <div class="np-badges" id="np-badges"></div>
+          </div>
+          <div class="np-seek">
+            <input type="range" class="seek" id="np-seek" min="0" max="1000" step="1" value="0" />
+            <div class="np-times"><span class="dot" id="np-pos">0:00</span><span class="dot" id="np-dur">0:00</span></div>
+          </div>
+          <div class="ctl">
+            <button class="sm" type="button" id="c-shuf" title="sıradakileri karıştır">⤮</button>
+            <button type="button" id="c-prev" title="önceki">|◀</button>
+            <button class="big" type="button" id="c-play" title="çal / duraklat">▶</button>
+            <button type="button" id="c-next" title="sonraki">▶|</button>
+            <button class="sm" type="button" id="c-rep" aria-pressed="false" title="tekrar">↻</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>SIRA</h2>
+            <span class="badge" id="q-count">0</span>
+            <div class="right">
+              <button class="btn btn-ghost" type="button" id="q-save">KAYDET</button>
+              <button class="btn btn-danger" type="button" id="q-clear">TEMİZLE</button>
+            </div>
+          </div>
+          <p class="page-hint" style="margin:0 0 .5rem">≡ tut-sürükle: yer değiştir · ✕ çıkar · dokun: o şarkıya geç</p>
+          <div class="list" id="queue"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KİTAPLIK -->
+    <section class="view" data-view="lib">
+      <div class="page">
+        <div class="seg" id="lib-mode">
+          <button type="button" data-mode="dl" aria-pressed="true">İNDİRİLEN</button>
+          <button type="button" data-mode="all" aria-pressed="false">TÜMÜ</button>
+          <button type="button" data-mode="liked" aria-pressed="false">BEĞENİ</button>
+          <button type="button" data-mode="lists" aria-pressed="false">LİSTELER</button>
+        </div>
+        <label class="search" id="lib-search">
+          <span class="ic" aria-hidden="true">&gt;</span>
+          <input id="lib-q" type="search" placeholder="kitaplıkta ara (internetsiz çalışır)" spellcheck="false" autocomplete="off" />
+          <button type="button" id="lib-q-x" hidden>✕</button>
+        </label>
+        <div class="bar" id="lib-bar">
+          <button class="btn btn-solid grow" type="button" id="lib-play">▶ HEPSİNİ ÇAL</button>
+          <button class="btn" type="button" id="lib-shuf">⤮ KARIŞIK</button>
+          <button class="btn" type="button" id="lib-add">＋ SIRAYA</button>
+        </div>
+        <div class="bar" id="lists-bar" hidden>
+          <button class="btn grow" type="button" id="pl-new">＋ YENİ LİSTE</button>
+          <button class="btn grow" type="button" id="pl-link">⇣ LİNKTEN AL</button>
+        </div>
+        <div class="sec" id="lib-sec"></div>
+        <div class="list" id="lib-list"></div>
+      </div>
+    </section>
+
+    <!-- ARA -->
+    <section class="view" data-view="search">
+      <div class="page">
+        <form class="search" id="s-form" autocomplete="off">
+          <span class="ic" aria-hidden="true">&gt;</span>
+          <input id="s-q" type="search" placeholder="YouTube Music'te ara ya da link yapıştır" spellcheck="false" enterkeyhint="search" />
+          <button type="submit">ARA</button>
+        </form>
+        <div class="seg" id="s-filter">
+          <button type="button" data-f="songs" aria-pressed="true">ŞARKI</button>
+          <button type="button" data-f="videos" aria-pressed="false">VİDEO</button>
+          <button type="button" data-f="albums" aria-pressed="false">ALBÜM</button>
+          <button type="button" data-f="playlists" aria-pressed="false">LİSTE</button>
+        </div>
+        <div class="spinner" id="s-spin"></div>
+        <div class="panel" id="s-offline" hidden>
+          <div class="panel-head"><h2>ÇEVRİMDIŞI</h2></div>
+          <p class="panel-desc">İnternet yok. YouTube'da arama yapılamaz ama indirdiğin şarkılarla sıra kurmaya, listeleri düzenlemeye devam edebilirsin.</p>
+          <button class="btn" type="button" data-go="lib">KİTAPLIĞA GİT →</button>
+        </div>
+        <div class="sec" id="s-sec"></div>
+        <div class="list" id="s-list"></div>
+      </div>
+    </section>
+
+    <!-- AYAR -->
+    <section class="view" data-view="settings">
+      <div class="page">
+        <div class="panel">
+          <div class="panel-head"><h2>ÇALMA</h2></div>
+          <div class="opt col">
+            <div class="head"><div class="n">Şarkıya dokununca</div></div>
+            <div class="d" style="margin-top:-.35rem">Hiçbiri mevcut sırayı silmez. ⋯ menüsünden her zaman diğerleri de seçilebilir.</div>
+            <div class="seg" data-pref="tap">
+              <button type="button" data-v="now">HEMEN ÇAL</button>
+              <button type="button" data-v="next">SIRADAKİ</button>
+              <button type="button" data-v="end">SONA EKLE</button>
+            </div>
+          </div>
+          <div class="opt">
+            <div class="txt"><div class="n">İnternetsizken atla</div><div class="d">İnternet yokken indirilmemiş şarkıya gelince sessizce sıradakine geç.</div></div>
+            <button class="switch" type="button" role="switch" data-pref-switch="skipOffline" aria-checked="true"></button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>İNDİRME</h2><div class="right"><span class="badge" id="st-bytes">0 MB</span></div></div>
+          <div class="opt col">
+            <div class="head"><div class="n">Ses kalitesi</div></div>
+            <div class="seg" data-pref="quality">
+              <button type="button" data-v="high">YÜKSEK</button>
+              <button type="button" data-v="low">DÜŞÜK · AZ YER</button>
+            </div>
+          </div>
+          <div class="opt col">
+            <div class="head"><div class="n">Otomatik indir</div></div>
+            <div class="d" style="margin-top:-.35rem">Sıraya ya da bir listeye eklediğin şarkılar kendiliğinden indirilsin: sonra internetsiz de çalar.</div>
+            <div class="seg" data-pref="autoDl">
+              <button type="button" data-v="off">KAPALI</button>
+              <button type="button" data-v="wifi">SADECE WI-FI</button>
+              <button type="button" data-v="always">HER ZAMAN</button>
+            </div>
+          </div>
+          <div class="opt">
+            <div class="txt"><div class="n">Elle indirmeler de sadece Wi-Fi</div><div class="d">Mobil veride indirme yapılmaz.</div></div>
+            <button class="switch" type="button" role="switch" data-pref-switch="dlWifiOnly" aria-checked="false"></button>
+          </div>
+          <div class="excl">
+            <div class="excl-head"><div class="n">İndirmeler</div><span class="val" id="dl-count">0</span></div>
+            <div id="dl-list"></div>
+            <div class="row-btns">
+              <button class="btn btn-ghost" type="button" id="dl-clear">BİTENLERİ TEMİZLE</button>
+              <button class="btn btn-danger" type="button" id="dl-cancel">HEPSİNİ DURDUR</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>YEREL MÜZİK</h2><div class="right"><span class="badge" id="st-local">0</span></div></div>
+          <p class="panel-desc">Telefondaki mp3 / flac / m4a dosyalarını kitaplığa ekler. Bunlar her zaman internetsiz çalar.</p>
+          <button class="btn" type="button" id="scan">TELEFONU TARA</button>
+        </div>
+
+        <div class="panel" id="upd-panel">
+          <div class="panel-head"><h2>GÜNCELLEME</h2><div class="right"><span class="badge red" id="upd-badge" hidden>YENİ</span></div></div>
+          <p class="panel-desc" id="upd-info">kurulu sürüm: —</p>
+          <div class="upd-bar" id="upd-bar" hidden><i id="upd-fill"></i></div>
+          <pre class="upd-notes" id="upd-notes" hidden></pre>
+          <div class="row-btns">
+            <button class="btn btn-ghost" type="button" id="upd-check">GÜNCELLEMELERİ KONTROL ET</button>
+            <button class="btn btn-solid" type="button" id="upd-install" hidden>İNDİR VE KUR</button>
+          </div>
+          <p class="note" style="margin-top:.8rem">Yeni sürüm GitHub'dan çekilir ve mevcut uygulamanın üstüne kurulur: kitaplık, listeler, sıra ve indirilen şarkılar yerinde kalır.</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>NASIL ÇALIŞIR</h2></div>
+          <ul class="how">
+            <li data-n="01">Sıra, listeler ve kitaplık tamamen telefonda tutulur. İnternet olmadan da sıraya ekleyip çıkarabilir, sürükleyip sıralayabilirsin.</li>
+            <li data-n="02">Şarkıya dokunmak sırayı <b>silmez</b>. Çalan şarkının arkasına eklenir.</li>
+            <li data-n="03">"Sıradaki" ile art arda eklenenler eklediğin sırayla çalar.</li>
+            <li data-n="04">İndirilen şarkılar kapağıyla birlikte saklanır. Sıradayken indirilen şarkı otomatik olarak dosyadan çalar.</li>
+            <li data-n="05">Uygulamayı kapatıp açınca sıra aynı şarkıdan, aynı saniyeden devam eder.</li>
+          </ul>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>OLAYLAR</h2><div class="right"><button class="btn btn-ghost" type="button" id="log-clear">TEMİZLE</button></div></div>
+          <div class="term term-mini" id="term"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- mini çalar: ÇALAN dışındaki sekmelerde -->
+    <div class="mini" id="mini" hidden>
+      <i class="prog" id="mini-prog"></i>
+      <div class="art" id="mini-art"></div>
+      <div class="t"><div class="nm" id="mini-title"></div><div class="ar" id="mini-artist"></div></div>
+      <button class="b" type="button" id="mini-play">▶</button>
+      <button class="b" type="button" id="mini-next">▶|</button>
+    </div>
+  </div>
+
+  <!-- Liste / albüm ayrıntısı (tam ekran) -->
+  <div class="sheet" id="sheet" hidden>
+    <div class="sheet-head">
+      <button class="btn btn-ghost" type="button" id="sheet-back">←</button>
+      <h3 id="sheet-title">LİSTE</h3>
+      <button class="btn btn-ghost" type="button" id="sheet-more">⋯</button>
+    </div>
+    <div class="sec" style="padding:.8rem 1rem .5rem" id="sheet-sec"></div>
+    <div class="bar" id="sheet-bar">
+      <button class="btn btn-solid grow" type="button" id="sh-play">▶ ÇAL</button>
+      <button class="btn" type="button" id="sh-shuf">⤮</button>
+      <button class="btn" type="button" id="sh-add">＋ SIRAYA</button>
+      <button class="btn" type="button" id="sh-dl">↓ İNDİR</button>
+    </div>
+    <div class="spinner" id="sheet-spin"></div>
+    <div class="sheet-list list" id="sheet-list"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
