@@ -724,3 +724,9 @@ input[type="range"].seek::-webkit-slider-thumb { width: 0.85rem; height: 0.85rem
 .dl-group.is-all .dl-head .art::after { content: "↓"; color: var(--red); }
 .dl-songs { padding-left: 0.6rem; border-left: 1px solid var(--red-line); margin: 0 0 0.6rem 1.7rem; }
 .dl-songs .row { min-height: 3.2rem; }
+
+/* Öneriler (sıranın ve listelerin altında) */
+.sugg-head { display: flex; align-items: center; gap: 0.5rem; padding: 1.4rem 0 0.4rem; }
+.sugg-head .sec { flex: 1; padding: 0; }
+.sugg-head .btn { padding: 0.35rem 0.6rem; }
+#qs-list .row .add, .sugg .row .add { border-color: var(--red-line); color: var(--red); }

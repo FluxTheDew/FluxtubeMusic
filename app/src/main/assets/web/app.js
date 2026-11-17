@@ -395,7 +395,7 @@
       if (it.kind === "artist") { openArtist(it.artist, it.title, it.thumb); return; }
       if (it.kind === "pl") { openPlaylist(it.id); return; }
       const act = e.target.closest("[data-act]")?.dataset.act;
-      if (act === "add") enqueue([it], "end");
+      if (act === "add") { if (ctx.onAdd) ctx.onAdd(it, k); else enqueue([it], "end"); }
       else if (act === "more") openSongMenu(it, ctx);
       else tapSong(it);
     });
@@ -1025,8 +1025,30 @@
       (ls.length ? '<div class="sec" style="padding:1.2rem 0 .3rem"><b>≡</b> ' + up(sh.listsTitle, "Albümler · Tekliler") + "</div>" + ls.map((r, i) =>
         '<div class="row pl-row" data-k="' + (songs.length + i) + '">' + artHtml(r, true) +
         '<div class="t"><div class="nm">' + esc(r.title) + '</div><div class="ar">' + esc(r.artist || "") + "</div></div>" +
-        '<span class="more">→</span></div>').join("") : "");
+        '<span class="more">→</span></div>').join("") : "") +
+      (sh.kind === "pl" && S.online ? '<div class="sugg-head"><div class="sec"><b>≈</b> ÖNERİLEN</div><button class="btn btn-ghost" type="button" data-sugg="more">↻</button></div>' +
+        '<div class="sugg">' + (sh.sugg || []).map((s, i) => songRow(s, songs.length + ls.length + i, { remote: !s.dl })).join("") +
+        (sh.sugg && !sh.sugg.length ? '<div class="empty-box">öneri yok</div>' : "") + "</div>" : "");
+    if (sh.kind === "pl" && S.online && !sh.sugg && !sh.suggBusy) loadPlSugg();
   }
+  /** Listenin şarkılarından rastgele birkaçına benzer şarkılar. */
+  function loadPlSugg() {
+    const cur = sh;
+    if (!cur) return;
+    cur.suggBusy = true;
+    const pool = cur.songs.slice();
+    for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    suggest(pool, cur.songs.map((s) => s.id).concat((cur.sugg || []).map((s) => s.id)), 20).then((items) => {
+      cur.sugg = items;
+      if (sh === cur) renderSheet();
+    }).finally(() => { cur.suggBusy = false; });
+  }
+  $("#sheet-list").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-sugg]") || !sh) return;
+    if (!S.online) { toast("internet yok", true); return; }
+    sh.sugg = null;
+    renderSheet();
+  });
   function openPlaylist(id) {
     const p = J(FM.playlist(id), null);
     if (!p) { toast("liste bulunamadı", true); return; }
@@ -1099,7 +1121,18 @@
   }
 
   $("#sheet-back").addEventListener("click", closeSheet);
-  bindSongList($("#sheet-list"), () => (sh ? sh.songs.concat(sh.lists || []) : []), () => (sh ? { kind: sh.kind, pid: sh.id } : {}));
+  bindSongList($("#sheet-list"), () => (sh ? sh.songs.concat(sh.lists || [], sh.sugg || []) : []), () => (sh ? {
+    kind: sh.kind, pid: sh.id,
+    onAdd: (it) => {
+      // Öneriden ＋ → bu listeye ekle; listedeki şarkıda ＋ → sıraya.
+      if (sh.kind === "pl" && sh.sugg && sh.sugg.includes(it)) {
+        FM.addToPlaylist(sh.id, JSON.stringify([it]));
+        sh.sugg = sh.sugg.filter((x) => x !== it);
+        toast("≡ listeye eklendi");
+        reloadSheet();
+      } else enqueue([it], "end");
+    },
+  } : {}));
   $("#sheet-hero").addEventListener("click", (e) => {
     const b = e.target.closest("[data-hero]");
     if (!b || !sh) return;
@@ -1491,6 +1524,7 @@
     prefs[k] = prefs[k] === "true" ? "false" : "true";
     FM.setPref(k, prefs[k]);
     renderPrefs();
+    if (k === "radio") { qs.for = null; qsTick(); }
   }));
 
   function renderStats() {
@@ -1643,26 +1677,65 @@
     wasOnline = S.online;
   }
 
+  // --- öneriler ----------------------------------------------------------------------------------
+
+  /** Birkaç tohum şarkının "benzer şarkılar"ını karıştırıp birleştir; zaten olanları çıkar. */
+  function suggest(seeds, exclude, max) {
+    const ids = seeds.filter((s) => s && String(s.id || "").startsWith("yt:")).slice(0, 3);
+    if (!ids.length) return Promise.resolve([]);
+    return Promise.all(ids.map((s) => call("similar", s.id.slice(3)).then((d) => d.songs || []).catch(() => [])))
+      .then((lists) => {
+        const out = [], seen = new Set(exclude);
+        for (let i = 0; out.length < max && lists.some((l) => i < l.length); i++) {
+          for (const l of lists) {
+            const x = l[i];
+            if (x && !seen.has(x.id)) { seen.add(x.id); out.push(Object.assign({ kind: "song" }, x)); }
+          }
+        }
+        return out.slice(0, max);
+      });
+  }
+
+  // Sıranın altında: çalan şarkıya (ve sıradakilere) göre öneriler. ＋ → sıranın sonuna.
+  let qs = { for: null, items: [], busy: false };
+  function qsTick() {
+    const on = prefs.radio === "true";
+    $("#qs-panel").hidden = !on;
+    if (!on || !S.online || !S.cur || qs.busy) return;
+    if (qs.for === S.cur.id) return;
+    loadQs();
+  }
+  function loadQs() {
+    if (!S.cur) return;
+    qs.busy = true;
+    qs.for = S.cur.id;
+    spinner($("#qs-spin"), !qs.items.length);
+    const seeds = [S.cur].concat(queue.slice(S.index + 1, S.index + 3));
+    suggest(seeds, queue.map((q) => q.id), 20).then((items) => {
+      qs.items = items;
+      renderQs();
+    }).finally(() => { qs.busy = false; spinner($("#qs-spin"), false); });
+  }
+  function renderQs() {
+    const have = new Set(queue.map((q) => q.id));
+    qs.items = qs.items.filter((x) => !have.has(x.id));
+    $("#qs-list").innerHTML = qs.items.length ? qs.items.map((s, k) => songRow(s, k, { remote: !s.dl })).join("")
+      : '<div class="empty-box">öneri yok</div>';
+  }
+  bindSongList($("#qs-list"), () => qs.items, () => ({
+    kind: "search",
+    onAdd: (it) => {
+      enqueue([it], "end");
+      qs.items = qs.items.filter((x) => x.id !== it.id);
+      renderQs();
+    },
+  }));
+  $("#qs-refresh").addEventListener("click", () => { if (!S.online) { toast("internet yok", true); return; } qs.items = []; loadQs(); });
+
   // --- döngü ------------------------------------------------------------------------------------------
 
   let ticks = 0;
-  let radioBusy = false, radioFor = null;
-  /** "Benzer şarkılar öner" açıksa: sırada en fazla 1 şarkı kalınca çalanın benzerlerini ekle. */
-  function autoRadio() {
-    if (prefs.radio !== "true" || radioBusy || !S.online || !S.cur || !S.count) return;
-    const id = S.cur.id || "";
-    if (!id.startsWith("yt:") || radioFor === id || S.count - S.index - 1 > 1) return;
-    radioBusy = true;
-    radioFor = id;
-    call("similar", id.slice(3)).then((d) => {
-      const have = new Set(queue.map((q) => q.id));
-      const add = (d.songs || []).filter((x) => !have.has(x.id)).slice(0, 10);
-      if (!add.length) return;
-      FM.enqueue(JSON.stringify(add), "suggest", 0);
-      toast("≈ " + add.length + " benzer şarkı eklendi");
-      setTimeout(poll, 150);
-    }).catch(() => { /* sessiz */ }).finally(() => { radioBusy = false; });
-  }
+
   function poll() {
     const s = J(FM.state(), null);
     if (!s) return;
@@ -1676,6 +1749,7 @@
       qrev = s.qrev;
       queue = J(FM.queue(), []);
       renderQueue();
+      if (prefs.radio === "true" && qs.items.length) renderQs();
     } else {
       markQueue();
     }
@@ -1705,7 +1779,7 @@
       if (ticks % 4 === 0) pollLogs();
     }
     if (ticks % 20 === 0) loadHome(false);
-    autoRadio();
+    qsTick();
     ticks++;
   }
 
