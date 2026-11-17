@@ -1537,7 +1537,7 @@
     prefs[k] = prefs[k] === "true" ? "false" : "true";
     FM.setPref(k, prefs[k]);
     renderPrefs();
-    if (k === "radio") { qs.for = null; qsTick(); }
+    if (k === "radio") { qs.rev = -1; if (prefs.radio === "true") FM.refreshSuggestions(); qsTick(); }
   }));
 
   function renderStats() {
@@ -1709,31 +1709,22 @@
       });
   }
 
-  // Sıranın altında: çalan şarkıya (ve sıradakilere) göre öneriler. ＋ → sıranın sonuna.
-  let qs = { for: null, items: [], busy: false };
+  // Sıranın altında: çalma servisinin öneri listesi (sıraya girenler de buradan).
+  // Kendiliğinden yenilenmez: sadece yeni şarkı başlatınca ya da ↻ ile.
+  let qs = { items: [], rev: -1 };
   function qsTick() {
     const on = prefs.radio === "true";
     $("#qs-panel").hidden = !on;
-    if (!on || !S.online || !S.cur || qs.busy) return;
-    if (qs.for === S.cur.id) return;
-    loadQs();
-  }
-  function loadQs() {
-    if (!S.cur) return;
-    qs.busy = true;
-    qs.for = S.cur.id;
-    spinner($("#qs-spin"), !qs.items.length);
-    const seeds = [S.cur].concat(queue.slice(S.index + 1, S.index + 3));
-    suggest(seeds, queue.map((q) => q.id), 20).then((items) => {
-      qs.items = items;
-      renderQs();
-    }).finally(() => { qs.busy = false; spinner($("#qs-spin"), false); });
+    if (!on || S.srev === qs.rev) return;
+    qs.rev = S.srev;
+    qs.items = J(FM.suggestions(), []);
+    renderQs();
   }
   function renderQs() {
     const have = new Set(queue.map((q) => q.id));
     qs.items = qs.items.filter((x) => !have.has(x.id));
     $("#qs-list").innerHTML = qs.items.length ? qs.items.map((s, k) => songRow(s, k, { remote: !s.dl })).join("")
-      : '<div class="empty-box">öneri yok</div>';
+      : '<div class="empty-box">' + (S.online ? "öneri yok" : "internet yok") + "</div>";
   }
   bindSongList($("#qs-list"), () => qs.items, () => ({
     kind: "qsugg",
@@ -1743,7 +1734,14 @@
       renderQs();
     },
   }));
-  $("#qs-refresh").addEventListener("click", () => { if (!S.online) { toast("internet yok", true); return; } qs.items = []; loadQs(); });
+  $("#qs-refresh").addEventListener("click", () => {
+    if (!S.online) { toast("internet yok", true); return; }
+    qs.items = [];
+    renderQs();
+    spinner($("#qs-spin"), true);
+    setTimeout(() => spinner($("#qs-spin"), false), 2500);
+    FM.refreshSuggestions();
+  });
 
   // --- döngü ------------------------------------------------------------------------------------------
 
@@ -1860,6 +1858,8 @@
       ] })), 500),
       openYt: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "Mix 1", songs: songs.slice(1, 6) } })), 500),
       jsError: () => {},
+      suggestions: () => JSON.stringify(songs.slice(8, 12).map((x) => Object.assign({ kind: "song" }, x))),
+      refreshSuggestions: () => {},
       similar: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "mix", songs: songs.slice(8, 12) } })), 300),
       boot: () => {}, touch: () => {}, pickCover: () => {}, removeCover: () => {},
       artist: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "TV Girl", thumb: "", all: "OLAK1", songs: songs.slice(0, 5), lists: [{ kind: "list", list: "OLAK2", title: "French Exit", artist: "Albüm · 2014", thumb: "" }] } })), 400),

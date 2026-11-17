@@ -50,6 +50,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         queueFile = File(filesDir, "queue.json")
 
         val http = OkHttpDataSource.Factory(Net.client)
@@ -93,6 +94,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         handler.removeCallbacks(autosave)
         handler.removeCallbacks(nearEnd)
+        if (instance === this) instance = null
         save()
         session.release()
         player.release()
@@ -167,46 +169,72 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    // --- öneriler açıkken sıra bitince önerilerden devam ------------------------------------
+    // --- öneriler: tek liste (ekrandaki ÖNERİLEN ile sıraya girenler aynı) -------------------
 
-    /** Önceden çekilmiş ama henüz sıraya konmamış öneriler. */
-    private val pending = ArrayDeque<Song>()
-    private var pendingSeed: String? = null
+    /** Henüz sıraya girmemiş öneriler. Kendiliğinden yenilenmez. */
+    private val pending = ArrayList<Song>()
+    /** Önerilerin dayandığı şarkı: sıranın ilk YouTube şarkısı (yeni şarkı başlatınca değişir). */
+    private var anchor: String? = null
     @Volatile private var suggestBusy = false
 
-    private fun radioOn() = Prefs.get("radio") == "true" && player.repeatMode == Player.REPEAT_MODE_OFF
-
-    /**
-     * "Benzer şarkılar öner" açık, tekrar kapalı ve son şarkıdaysak öneri adaylarını
-     * önceden çek (sıraya KOYMADAN). Sıraya sadece çalacak olan girer: şarkının son
-     * saniyelerinde bir tane (kesintisiz geçiş için) ya da sıra bitince.
-     */
-    private fun continueWithSuggestions() {
-        // Sıra değişti (ör. aramadan yeni şarkı): eski şarkıya göre bekleyen önerileri at.
-        val seed = queueIds().lastOrNull { it.startsWith("yt:") }
-        if (seed != pendingSeed) { pending.clear(); pendingSeed = null }
-        if (!radioOn() || player.mediaItemCount == 0 || player.hasNextMediaItem()) return
-        if (player.playbackState == Player.STATE_ENDED && pending.isNotEmpty()) { appendOne(true); return }
-        if (pending.isNotEmpty()) return
-        prefetch()
-    }
-
+    private fun suggestOn() = Prefs.get("radio") == "true"
+    private fun radioOn() = suggestOn() && player.repeatMode == Player.REPEAT_MODE_OFF
     private fun queueIds() = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
 
-    private fun prefetch() {
-        if (suggestBusy || !Net.online(this)) return
+    /** Arayüz için: bekleyen öneriler. */
+    private fun publish() {
+        val arr = JSONArray()
+        pending.forEach { arr.put(it.uiJson().put("kind", "song")) }
+        suggestJson = arr.toString()
+        suggestRev++
+    }
+
+    /**
+     * Sıra değişince: yeni şarkı başlatıldıysa (sıranın ilk şarkısı değiştiyse) öneriler
+     * o şarkıya göre baştan; değilse aynı liste kalır, sadece sıraya girmiş olanlar düşer.
+     * Öneriler açık, tekrar kapalı ve son şarkıdaysak sıra bitince sıradaki öneri girer.
+     */
+    private fun continueWithSuggestions() {
+        if (!suggestOn()) return
         val ids = queueIds()
-        val seed = ids.lastOrNull { it.startsWith("yt:") } ?: return
-        if (pendingSeed == seed) return
-        pendingSeed = seed
-        suggestBusy = true
+        val first = ids.firstOrNull { it.startsWith("yt:") }
+        if (first != anchor) {
+            anchor = first
+            pending.clear()
+            publish()
+            if (first != null) fetch(first, replace = true)
+            return
+        }
         val have = ids.toSet()
+        if (pending.removeAll { it.id in have }) publish()
+        if (!radioOn() || ids.isEmpty() || player.hasNextMediaItem()) return
+        if (player.playbackState == Player.STATE_ENDED) {
+            if (pending.isNotEmpty()) appendOne(true) else anchor?.let { fetch(it, replace = false) }
+        }
+    }
+
+    /** ↻: önerileri şimdi çalan şarkıya göre yenile. */
+    fun refreshSuggestions() {
+        val cur = player.currentMediaItem?.mediaId?.takeIf { it.startsWith("yt:") }
+            ?: queueIds().firstOrNull { it.startsWith("yt:") } ?: return
+        anchor = queueIds().firstOrNull { it.startsWith("yt:") }
+        pending.clear()
+        publish()
+        fetch(cur, replace = true)
+    }
+
+    /** seed'e benzer şarkıları çek. replace=false: liste bittiyse sonuna yenilerini ekle. */
+    private fun fetch(seed: String, replace: Boolean) {
+        if (suggestBusy || !Net.online(this)) return
+        suggestBusy = true
+        val exclude = queueIds().toSet() + pending.map { it.id }
+        val forAnchor = anchor
         Thread {
             try {
                 val arr = YtAccount.similar(seed.removePrefix("yt:")).optJSONArray("songs") ?: JSONArray()
                 val songs = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
-                    .filter { it.optString("id").startsWith("yt:") && it.optString("id") !in have }
-                    .take(10)
+                    .filter { it.optString("id").startsWith("yt:") && it.optString("id") !in exclude && it.optString("id") != seed }
+                    .take(25)
                     .map {
                         Song(
                             id = it.getString("id"),
@@ -217,26 +245,27 @@ class PlaybackService : MediaSessionService() {
                         )
                     }
                 handler.post {
-                    if (pendingSeed != seed) return@post
-                    pending.clear()
-                    pending.addAll(songs)
-                    // Bu arada sıra bitmişse hemen devam et.
+                    if (anchor != forAnchor) return@post // bu arada yeni şarkı başlatıldı
+                    if (replace) pending.clear()
+                    val have = queueIds().toSet()
+                    pending.addAll(songs.filter { it.id !in have && pending.none { p -> p.id == it.id } })
+                    publish()
                     if (player.playbackState == Player.STATE_ENDED && radioOn() && !player.hasNextMediaItem()) appendOne(true)
                 }
             } catch (e: Exception) {
                 Logbook.add("ERR", "öneri alınamadı: ${e.message}")
-                handler.post { pendingSeed = null }
             } finally {
                 suggestBusy = false
             }
         }.start()
     }
 
-    /** Bekleyen önerilerden sırada olmayan ilkini sıranın sonuna ekle. */
+    /** Listedeki ilk öneriyi sıranın sonuna koy. */
     private fun appendOne(startNow: Boolean) {
         val have = queueIds().toSet()
-        while (pending.isNotEmpty() && pending.first().id in have) pending.removeFirst()
-        val next = pending.removeFirstOrNull() ?: return
+        pending.removeAll { it.id in have }
+        val next = pending.removeFirstOrNull() ?: run { publish(); return }
+        publish()
         val saved = Library.upsert(next)
         player.addMediaItem(Library.mediaItem(saved))
         if (startNow) {
@@ -246,15 +275,16 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    /** Çalarken saniyede bir: son şarkının bitmesine az kaldıysa sıradaki öneriyi koy. */
+    /** Çalarken saniyede bir: son şarkının bitmesine 8 sn kala sıradaki öneriyi koy. */
     private val nearEnd = object : Runnable {
         override fun run() {
             handler.postDelayed(this, 1000)
             if (!player.isPlaying || !radioOn() || player.hasNextMediaItem()) return
             val dur = player.duration
             if (dur <= 0 || dur == C.TIME_UNSET) return
-            if (pending.isEmpty()) { prefetch(); return }
-            if (dur - player.currentPosition <= 8000) appendOne(false)
+            if (dur - player.currentPosition > 8000) return
+            if (pending.isNotEmpty()) appendOne(false)
+            else anchor?.let { fetch(it, replace = false) } // liste bitti: aynı şarkıya göre devamı
         }
     }
 
@@ -320,5 +350,12 @@ class PlaybackService : MediaSessionService() {
         } catch (e: Exception) {
             Logbook.add("ERR", "sıra okunamadı: ${e.message}")
         }
+    }
+
+    companion object {
+        /** Arayüzün okuduğu öneri listesi (JSON) ve sürümü. */
+        @Volatile var suggestJson = "[]"
+        @Volatile var suggestRev = 0L
+        @Volatile var instance: PlaybackService? = null
     }
 }

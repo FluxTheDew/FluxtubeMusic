@@ -315,6 +315,7 @@ class MainActivity : Activity() {
             .put("dlActive", Downloads.active())
             .put("online", Net.online(this))
             .put("arev", YtAccount.rev)
+            .put("srev", PlaybackService.suggestRev)
             .put("syncing", YtAccount.syncing)
             .put("update", JSONObject()
                 .put("phase", Updater.phase)
@@ -659,6 +660,10 @@ class MainActivity : Activity() {
 
         @JavascriptInterface fun home(req: Int) = async(req) { YtAccount.home() }
         @JavascriptInterface fun similar(req: Int, videoId: String) = async(req) { YtAccount.similar(videoId) }
+
+        /** Sıranın altındaki ÖNERİLEN: çalma servisinin listesi (sıraya girenler buradan). */
+        @JavascriptInterface fun suggestions(): String = PlaybackService.suggestJson
+        @JavascriptInterface fun refreshSuggestions() = main.post { PlaybackService.instance?.refreshSuggestions() }
         @JavascriptInterface fun artist(req: Int, id: String) = async(req) { YtAccount.artist(id) }
 
         /** Liste kapağı: galeriden resim seç / kaldır. */
