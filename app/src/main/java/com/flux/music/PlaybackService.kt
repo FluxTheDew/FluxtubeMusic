@@ -117,10 +117,22 @@ class PlaybackService : MediaSessionService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             mediaItem?.mediaId?.let { Library.markPlayed(it) }
             save()
+            continueWithSuggestions()
         }
 
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) save()
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                save()
+                continueWithSuggestions()
+            }
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_ENDED) continueWithSuggestions()
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            continueWithSuggestions()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -151,6 +163,66 @@ class PlaybackService : MediaSessionService() {
                 errorsInRow = 0
             }
         }
+    }
+
+    // --- öneriler açıkken sıra bitince önerilerden devam ------------------------------------
+
+    private var suggestFor: String? = null
+    @Volatile private var suggestBusy = false
+
+    /**
+     * "Benzer şarkılar öner" açık, tekrar kapalı ve son şarkıdaysak: son YouTube
+     * şarkısına benzer birkaç şarkıyı sıranın sonuna ekle; sıra bitmişse çalmaya devam et.
+     * Arayüz kapalıyken (ekran kapalı) de çalışsın diye serviste.
+     */
+    private fun continueWithSuggestions() {
+        if (Prefs.get("radio") != "true" || suggestBusy) return
+        if (player.repeatMode != Player.REPEAT_MODE_OFF) return
+        val n = player.mediaItemCount
+        if (n == 0 || player.hasNextMediaItem()) return
+        val ids = (0 until n).map { player.getMediaItemAt(it).mediaId }
+        val seed = ids.lastOrNull { it.startsWith("yt:") } ?: return
+        val cur = player.currentMediaItem?.mediaId
+        if (suggestFor == "$seed|$cur" || !Net.online(this)) return
+        suggestFor = "$seed|$cur"
+        suggestBusy = true
+        val have = ids.toSet()
+        Thread {
+            try {
+                val arr = YtAccount.similar(seed.removePrefix("yt:")).optJSONArray("songs") ?: JSONArray()
+                val songs = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                    .filter { it.optString("id").startsWith("yt:") && it.optString("id") !in have }
+                    .take(5)
+                    .map {
+                        Song(
+                            id = it.getString("id"),
+                            title = it.optString("title", "?"),
+                            artist = it.optString("artist", ""),
+                            durationSec = it.optLong("dur", 0),
+                            thumb = it.optString("thumb", ""),
+                        )
+                    }
+                if (songs.isEmpty()) return@Thread
+                val saved = Library.upsertAll(songs)
+                handler.post {
+                    // Bu arada kullanıcı sıraya bir şey eklediyse karışma.
+                    if (player.hasNextMediaItem() || player.repeatMode != Player.REPEAT_MODE_OFF) return@post
+                    val ended = player.playbackState == Player.STATE_ENDED
+                    player.addMediaItems(saved.map { Library.mediaItem(it) })
+                    if (ended) {
+                        player.seekToNextMediaItem()
+                        player.prepare()
+                        player.play()
+                    }
+                    Logbook.add("SYS", "önerilerden devam: ${saved.size} şarkı eklendi")
+                }
+            } catch (e: Exception) {
+                Logbook.add("ERR", "öneri alınamadı: ${e.message}")
+                suggestFor = null
+            } finally {
+                suggestBusy = false
+            }
+        }.start()
     }
 
     private val autosave = object : Runnable {
