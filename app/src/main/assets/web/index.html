@@ -132,7 +132,10 @@
               <button class="btn btn-danger" type="button" id="q-clear">TEMİZLE</button>
             </div>
           </div>
-          <p class="page-hint" style="margin:0 0 .5rem">≡ tut-sürükle: yer değiştir · ✕ çıkar · dokun: o şarkıya geç</p>
+          <div class="opt q-radio">
+            <div class="txt"><div class="n">Benzer şarkılar öner</div></div>
+            <button class="switch" type="button" role="switch" data-pref-switch="radio" aria-checked="false"></button>
+          </div>
           <div class="list" id="queue"></div>
         </div>
       </div>
@@ -275,6 +278,7 @@
       <h3 id="sheet-title">LİSTE</h3>
       <button class="btn btn-ghost" type="button" id="sheet-more">⋯</button>
     </div>
+    <div class="sheet-body" id="sheet-body">
     <div class="sheet-hero" id="sheet-hero"></div>
     <div class="sec" style="padding:.8rem 1rem .5rem" id="sheet-sec"></div>
     <div class="bar" id="sheet-bar">
@@ -285,6 +289,7 @@
     </div>
     <div class="spinner" id="sheet-spin"></div>
     <div class="sheet-list list" id="sheet-list"></div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>

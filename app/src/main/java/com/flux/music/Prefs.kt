@@ -14,6 +14,7 @@ object Prefs {
         "tap" to "now",           // now | next | end — şarkıya dokununca
         "skipOffline" to "true",  // internet yokken indirilmemişleri atla
         "dlWifiOnly" to "false",  // elle indirmeleri de sadece Wi-Fi'de yap
+        "radio" to "false",       // sıra bitmeden benzer şarkılar ekle
     )
 
     fun init(ctx: Context) {

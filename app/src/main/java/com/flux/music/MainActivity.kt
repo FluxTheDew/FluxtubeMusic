@@ -129,6 +129,10 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
         }
         if (Updater.phase == "idle" && Net.online(this)) Updater.check(this)
+        // Eski eşitlemede kapağı kaydedilmemiş YouTube listeleri varsa doldur.
+        if (YtAccount.loggedIn && Net.online(this) && Library.playlists().any { it.src != null && it.thumb == null }) {
+            bg.execute { runCatching { YtAccount.refreshThumbs() }.onFailure { Logbook.add("ERR", "liste kapakları alınamadı: ${it.message}") } }
+        }
     }
 
     override fun onStart() {
@@ -409,7 +413,7 @@ class MainActivity : Activity() {
     private fun playlistArt(pid: String): WebResourceResponse? {
         Library.coverFile(pid).takeIf { it.exists() && it.length() > 0 }?.let { return fileResponse(it) }
         val p = Library.playlist(pid) ?: return null
-        val cached = Library.artFile("pl:$pid")
+        val cached = Library.artFile("pl:$pid-${p.thumb?.hashCode() ?: 0}")
         if (!cached.exists() && !p.thumb.isNullOrEmpty() && Net.online(this)) runCatching {
             Net.client.newCall(okhttp3.Request.Builder().url(p.thumb).header("User-Agent", Net.UA).build()).execute().use { r ->
                 if (r.isSuccessful) r.body?.bytes()?.takeIf { it.isNotEmpty() }?.let { cached.writeBytes(it) }
@@ -533,7 +537,8 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun enqueue(json: String, mode: String, start: Int): Int {
             val ids = parseSongs(json).map { it.id }
-            if (mode != "replace" && mode != "shuffle") autoDownload(ids)
+            // Öneriler (benzer şarkılar) kendiliğinden inmesin.
+            if (mode != "replace" && mode != "shuffle" && mode != "suggest") autoDownload(ids)
             withPlayer { doEnqueue(it, ids, mode, start) }
             return ids.size
         }
@@ -589,7 +594,10 @@ class MainActivity : Activity() {
                     .put("dl", songs.count { it.offline })
                     .put("cover", "pl:" + p.id)
                     // Kapak değişince WebView önbelleği eskisini göstermesin.
-                    .put("coverV", Library.coverFile(p.id).let { f -> if (f.exists()) f.lastModified() else 0L }))
+                    .put("coverV", Library.coverVersion(p))
+                    .put("custom", Library.coverFile(p.id).exists())
+                    .put("src", p.src ?: JSONObject.NULL)
+                    .put("ids", JSONArray(p.songs)))
             }
         }.toString()
 
@@ -598,7 +606,8 @@ class MainActivity : Activity() {
             val p = Library.playlist(id) ?: return "null"
             return JSONObject().put("id", p.id).put("name", p.name).put("yt", p.src != null)
                 .put("cover", "pl:" + p.id)
-                .put("coverV", Library.coverFile(p.id).let { f -> if (f.exists()) f.lastModified() else 0L })
+                .put("coverV", Library.coverVersion(p))
+                .put("custom", Library.coverFile(p.id).exists())
                 .put("songs", songsJson(p.songs.mapNotNull { Library.get(it) })).toString()
         }
 
@@ -649,6 +658,7 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface fun home(req: Int) = async(req) { YtAccount.home() }
+        @JavascriptInterface fun similar(req: Int, videoId: String) = async(req) { YtAccount.similar(videoId) }
         @JavascriptInterface fun artist(req: Int, id: String) = async(req) { YtAccount.artist(id) }
 
         /** Liste kapağı: galeriden resim seç / kaldır. */

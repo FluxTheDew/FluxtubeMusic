@@ -267,8 +267,12 @@ object YtAccount {
         val name = text(head?.optJSONObject("title")).ifBlank { "sanatçı" }
         val songs = JSONArray()
         var allId: String? = null
+        var songsTitle = ""
         first(r, "musicShelfRenderer")?.let { shelf ->
-            for (it in all(shelf, "musicResponsiveListItemRenderer")) song(it)?.let { s -> songs.put(s.uiJson()) }
+            songsTitle = text(shelf.optJSONObject("title"))
+            for (it in all(shelf, "musicResponsiveListItemRenderer")) song(it)?.let { s ->
+                songs.put(s.uiJson().put("views", views(it)).put("album", albumOf(it)))
+            }
             // "Tümünü göster" → tüm şarkılar listesi
             allId = first(shelf.optJSONObject("title") ?: shelf.optJSONObject("bottomEndpoint"), "browseEndpoint")
                 ?.optString("browseId")?.takeIf { it.startsWith("VL") }?.removePrefix("VL")
@@ -284,8 +288,38 @@ object YtAccount {
                 }
             }
         }
+        val listsTitle = all(r, "musicCarouselShelfRenderer").firstOrNull()
+            ?.let { text(first(it, "musicCarouselShelfBasicHeaderRenderer")?.optJSONObject("title")) } ?: ""
         return JSONObject().put("name", name).put("thumb", lastThumb(head)).put("songs", songs)
+            .put("songsTitle", songsTitle).put("listsTitle", listsTitle)
             .put("lists", lists).put("all", allId ?: JSONObject.NULL)
+    }
+
+    private fun flexTexts(r: JSONObject): List<String> {
+        val cols = r.optJSONArray("flexColumns") ?: return emptyList()
+        return (0 until cols.length()).map { i ->
+            text(cols.optJSONObject(i)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text"))
+        }
+    }
+
+    /** "1,2 Mr oynatma" / "35 Mn görüntüleme" gibi dinlenme sayısı (varsa). */
+    private fun views(r: JSONObject): String =
+        flexTexts(r).drop(1).flatMap { it.split(" • ") }.map { it.trim() }
+            .firstOrNull { Regex("(?i)(oynatma|görüntüleme|izlenme|dinlenme|plays?|views?)").containsMatchIn(it) } ?: ""
+
+    /** Şarkının albümü (sanatçı sayfasındaki satırlarda son sütun). */
+    private fun albumOf(r: JSONObject): String {
+        val t = flexTexts(r)
+        return if (t.size >= 4) t.last().trim() else ""
+    }
+
+    /** Bir şarkıya benzer şarkılar (YouTube'un otomatik karışığı). */
+    fun similar(videoId: String): JSONObject = openList("RDAMVM$videoId")
+
+    /** Eski eşitlemelerde kaydedilmemiş liste kapaklarını tek istekle doldur. */
+    fun refreshThumbs() {
+        if (!loggedIn) return
+        for (l in playlists()) if (l.thumb.isNotEmpty()) Library.setThumbBySrc("yt:${l.id}", l.thumb)
     }
 
     // --- ana sayfa -----------------------------------------------------------------------------

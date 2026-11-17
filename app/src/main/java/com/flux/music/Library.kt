@@ -271,6 +271,22 @@ object Library {
         return id
     }
 
+    /** Eşitlenmiş listenin YouTube kapağını sonradan doldur (eski eşitlemelerde yoktu). */
+    fun setThumbBySrc(src: String, thumb: String) {
+        var changedAny = false
+        synchronized(this) {
+            val p = lists.values.firstOrNull { it.src == src } ?: return
+            if (p.thumb != thumb) { lists[p.id] = p.copy(thumb = thumb); changedAny = true }
+        }
+        if (changedAny) changed()
+    }
+
+    /** Kapak sürümü: kendi resmin ya da YouTube kapağı değişince WebView eskisini göstermesin. */
+    fun coverVersion(p: Playlist): String {
+        val f = coverFile(p.id)
+        return (if (f.exists()) f.lastModified() else 0L).toString() + "-" + (p.thumb?.hashCode() ?: 0)
+    }
+
     /** Hesaptan gelen listeyi oluştur ya da (aynı kaynaktan) güncelle. */
     fun syncPlaylist(src: String, name: String?, ids: List<String>, thumb: String? = null): String {
         val id = synchronized(this) {
