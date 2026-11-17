@@ -80,6 +80,7 @@ class PlaybackService : MediaSessionService() {
 
         restore()
         handler.postDelayed(autosave, 10_000)
+        handler.postDelayed(nearEnd, 1000)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
@@ -91,6 +92,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         handler.removeCallbacks(autosave)
+        handler.removeCallbacks(nearEnd)
         save()
         session.release()
         player.release()
@@ -167,24 +169,36 @@ class PlaybackService : MediaSessionService() {
 
     // --- öneriler açıkken sıra bitince önerilerden devam ------------------------------------
 
-    private var suggestFor: String? = null
+    /** Önceden çekilmiş ama henüz sıraya konmamış öneriler. */
+    private val pending = ArrayDeque<Song>()
+    private var pendingSeed: String? = null
     @Volatile private var suggestBusy = false
 
+    private fun radioOn() = Prefs.get("radio") == "true" && player.repeatMode == Player.REPEAT_MODE_OFF
+
     /**
-     * "Benzer şarkılar öner" açık, tekrar kapalı ve son şarkıdaysak: son YouTube
-     * şarkısına benzer birkaç şarkıyı sıranın sonuna ekle; sıra bitmişse çalmaya devam et.
-     * Arayüz kapalıyken (ekran kapalı) de çalışsın diye serviste.
+     * "Benzer şarkılar öner" açık, tekrar kapalı ve son şarkıdaysak öneri adaylarını
+     * önceden çek (sıraya KOYMADAN). Sıraya sadece çalacak olan girer: şarkının son
+     * saniyelerinde bir tane (kesintisiz geçiş için) ya da sıra bitince.
      */
     private fun continueWithSuggestions() {
-        if (Prefs.get("radio") != "true" || suggestBusy) return
-        if (player.repeatMode != Player.REPEAT_MODE_OFF) return
-        val n = player.mediaItemCount
-        if (n == 0 || player.hasNextMediaItem()) return
-        val ids = (0 until n).map { player.getMediaItemAt(it).mediaId }
+        // Sıra değişti (ör. aramadan yeni şarkı): eski şarkıya göre bekleyen önerileri at.
+        val seed = queueIds().lastOrNull { it.startsWith("yt:") }
+        if (seed != pendingSeed) { pending.clear(); pendingSeed = null }
+        if (!radioOn() || player.mediaItemCount == 0 || player.hasNextMediaItem()) return
+        if (player.playbackState == Player.STATE_ENDED && pending.isNotEmpty()) { appendOne(true); return }
+        if (pending.isNotEmpty()) return
+        prefetch()
+    }
+
+    private fun queueIds() = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
+
+    private fun prefetch() {
+        if (suggestBusy || !Net.online(this)) return
+        val ids = queueIds()
         val seed = ids.lastOrNull { it.startsWith("yt:") } ?: return
-        val cur = player.currentMediaItem?.mediaId
-        if (suggestFor == "$seed|$cur" || !Net.online(this)) return
-        suggestFor = "$seed|$cur"
+        if (pendingSeed == seed) return
+        pendingSeed = seed
         suggestBusy = true
         val have = ids.toSet()
         Thread {
@@ -192,7 +206,7 @@ class PlaybackService : MediaSessionService() {
                 val arr = YtAccount.similar(seed.removePrefix("yt:")).optJSONArray("songs") ?: JSONArray()
                 val songs = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
                     .filter { it.optString("id").startsWith("yt:") && it.optString("id") !in have }
-                    .take(5)
+                    .take(10)
                     .map {
                         Song(
                             id = it.getString("id"),
@@ -202,27 +216,46 @@ class PlaybackService : MediaSessionService() {
                             thumb = it.optString("thumb", ""),
                         )
                     }
-                if (songs.isEmpty()) return@Thread
-                val saved = Library.upsertAll(songs)
                 handler.post {
-                    // Bu arada kullanıcı sıraya bir şey eklediyse karışma.
-                    if (player.hasNextMediaItem() || player.repeatMode != Player.REPEAT_MODE_OFF) return@post
-                    val ended = player.playbackState == Player.STATE_ENDED
-                    player.addMediaItems(saved.map { Library.mediaItem(it) })
-                    if (ended) {
-                        player.seekToNextMediaItem()
-                        player.prepare()
-                        player.play()
-                    }
-                    Logbook.add("SYS", "önerilerden devam: ${saved.size} şarkı eklendi")
+                    if (pendingSeed != seed) return@post
+                    pending.clear()
+                    pending.addAll(songs)
+                    // Bu arada sıra bitmişse hemen devam et.
+                    if (player.playbackState == Player.STATE_ENDED && radioOn() && !player.hasNextMediaItem()) appendOne(true)
                 }
             } catch (e: Exception) {
                 Logbook.add("ERR", "öneri alınamadı: ${e.message}")
-                suggestFor = null
+                handler.post { pendingSeed = null }
             } finally {
                 suggestBusy = false
             }
         }.start()
+    }
+
+    /** Bekleyen önerilerden sırada olmayan ilkini sıranın sonuna ekle. */
+    private fun appendOne(startNow: Boolean) {
+        val have = queueIds().toSet()
+        while (pending.isNotEmpty() && pending.first().id in have) pending.removeFirst()
+        val next = pending.removeFirstOrNull() ?: return
+        val saved = Library.upsert(next)
+        player.addMediaItem(Library.mediaItem(saved))
+        if (startNow) {
+            player.seekToNextMediaItem()
+            player.prepare()
+            player.play()
+        }
+    }
+
+    /** Çalarken saniyede bir: son şarkının bitmesine az kaldıysa sıradaki öneriyi koy. */
+    private val nearEnd = object : Runnable {
+        override fun run() {
+            handler.postDelayed(this, 1000)
+            if (!player.isPlaying || !radioOn() || player.hasNextMediaItem()) return
+            val dur = player.duration
+            if (dur <= 0 || dur == C.TIME_UNSET) return
+            if (pending.isEmpty()) { prefetch(); return }
+            if (dur - player.currentPosition <= 8000) appendOne(false)
+        }
     }
 
     private val autosave = object : Runnable {
