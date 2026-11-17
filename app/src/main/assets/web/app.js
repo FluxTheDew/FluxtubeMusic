@@ -322,7 +322,9 @@
     toast((mode === "end" || mode === "next") && songs.length > 1 ? what + MODE_TOAST[mode] : MODE_TOAST[mode]);
     setTimeout(poll, 120);
   }
-  function tapSong(song) {
+  function tapSong(song, ctx) {
+    // Ana sayfa ve aramada: sıra tamamen o şarkı olur (öneriler açıksa arkası kendiliğinden gelir).
+    if (ctx && (ctx.kind === "home" || ctx.kind === "search")) { enqueue([song], "replace"); return; }
     enqueue([song], prefs.tap || "now");
   }
 
@@ -377,9 +379,9 @@
     el.addEventListener("pointerup", cancel);
     el.addEventListener("pointercancel", cancel);
     el.addEventListener("contextmenu", (e) => e.preventDefault());
-    attachSwipe(el, "↳ SIRADAKİ", (row) => {
+    attachSwipe(el, "＋ SIRAYA", (row) => {
       const it = getItems()[Number(row.dataset[attr])];
-      if (it && (it.kind === "song" || !it.kind)) enqueue([it], "next");
+      if (it && (it.kind === "song" || !it.kind)) enqueue([it], "end");
     });
     el.addEventListener("click", (e) => {
       if (lpFired) { lpFired = false; return; }
@@ -397,7 +399,7 @@
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act === "add") { if (ctx.onAdd) ctx.onAdd(it, k); else enqueue([it], "end"); }
       else if (act === "more") openSongMenu(it, ctx);
-      else tapSong(it);
+      else tapSong(it, ctx);
     });
   }
 
@@ -1242,14 +1244,16 @@
       return songRow(known ? Object.assign({}, r, { dl: known.dl, liked: known.liked }) : r, k, { remote: true });
     }).join("");
   }
-  function doSearch() {
+  function doSearch(auto) {
     const q = $("#s-q").value.trim();
     if (!q) return;
-    $("#s-q").blur();
+    if (auto && q === sLastQ && sFilter === sLastF) return;
+    if (!auto) $("#s-q").blur();
     if (/^(https?:\/\/)?([\w-]+\.)?(youtube\.com|youtu\.be)\//i.test(q)) { importLink(q); return; }
     if (!S.online) { renderSearchState(); toast("internet yok", true); return; }
     sLastQ = q;
     const f = sFilter;
+    sLastF = f;
     sResults = [];
     renderSearch();
     $("#s-sec").innerHTML = "";
@@ -1265,7 +1269,16 @@
       renderSearch();
     });
   }
-  $("#s-form").addEventListener("submit", (e) => { e.preventDefault(); doSearch(); });
+  $("#s-form").addEventListener("submit", (e) => { e.preventDefault(); clearTimeout(sTimer); doSearch(); });
+  let sTimer = 0, sLastF = "";
+  $("#s-q").addEventListener("input", () => {
+    clearTimeout(sTimer);
+    const q = $("#s-q").value.trim();
+    // Link yapıştırılınca beklemeden aç; yazarken 0,6 sn durunca ara.
+    if (/^(https?:\/\/)?([\w-]+\.)?(youtube\.com|youtu\.be)\//i.test(q)) return;
+    if (q.length < 2) return;
+    sTimer = setTimeout(() => doSearch(true), 600);
+  });
   $$("#s-filter button").forEach((b) => b.addEventListener("click", () => {
     sFilter = b.dataset.f;
     $$("#s-filter button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
@@ -1723,7 +1736,7 @@
       : '<div class="empty-box">öneri yok</div>';
   }
   bindSongList($("#qs-list"), () => qs.items, () => ({
-    kind: "search",
+    kind: "qsugg",
     onAdd: (it) => {
       enqueue([it], "end");
       qs.items = qs.items.filter((x) => x.id !== it.id);
