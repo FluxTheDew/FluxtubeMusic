@@ -128,12 +128,12 @@
   $$(".bnav button").forEach((b) => b.addEventListener("click", () => {
     // Alt menü her yerde: açık sayfaları kapatıp sekmeye git.
     closeMenu(); closePlayer(); closeSettings();
-    if (!$("#sheet").hidden) closeSheet();
+    closeSheetAll();
     go(b.dataset.tab);
   }));
   document.addEventListener("click", (e) => {
     const g = e.target.closest("[data-go]");
-    if (g) { closePlayer(); closeSettings(); if (!$("#sheet").hidden) closeSheet(); go(g.dataset.go); }
+    if (g) { closePlayer(); closeSettings(); closeSheetAll(); go(g.dataset.go); }
   });
 
   // --- animasyonlar (ayarlardan: her biri aç/kapa + hız) ------------------------------------
@@ -516,6 +516,25 @@
   let seeking = false;
   let npId = null;
 
+  /** Sanatçı adından sanatçı sayfası: YouTube Music'te sanatçıyı arayıp ilk eşleşeni aç. */
+  function openArtistByName(name) {
+    const first = String(name || "").split(/,| & | ve | x | feat\.? | ft\.? /i)[0].trim();
+    if (!first || first === "—") return;
+    if (!S.online) { toast("internet yok", true); return; }
+    toast("⌕ " + first);
+    call("search", first, "artists").then((arr) => {
+      const list = (arr || []).filter((x) => x.kind === "artist");
+      if (!list.length) { toast("sanatçı bulunamadı", true); return; }
+      const want = norm(first);
+      const hit = list.find((x) => norm(x.title) === want) || list[0];
+      closePlayer(true);
+      openArtist(hit.artist, hit.title, hit.thumb);
+    }).catch((e) => toast("sanatçı açılamadı: " + e.message, true));
+  }
+  $("#np-artist").addEventListener("click", () => {
+    if (S.cur && !S.cur.local) openArtistByName(S.cur.artist);
+  });
+
   function renderNow() {
     const c = S.cur;
     const np = $("#np");
@@ -524,7 +543,8 @@
       npId = c ? c.id : null;
       $("#np-art").outerHTML = artHtml(c, false).replace('<div class="art">', '<div class="art" id="np-art">');
       $("#np-title").textContent = c ? c.title : "sıra boş";
-      $("#np-artist").textContent = c ? (c.artist || "—") : "kitaplıktan ya da aramadan şarkı ekle";
+      $("#np-artist").textContent = c ? (c.artist || "—") : "";
+      $("#np-artist").classList.toggle("is-link", !!(c && !c.local && c.artist));
     }
     const badges = [];
     if (c) {
@@ -984,16 +1004,33 @@
   /** sh = { kind: "pl" | "yt", id?, url?, name, songs } */
   let sh = null;
 
+  /** Açık sayfanın altındakiler: albümden geri dönünce sanatçı sayfasına dön. */
+  const shStack = [];
   function openSheet(data) {
+    const open = !$("#sheet").hidden && !$("#sheet").classList.contains("a-out");
+    if (open && sh) { sh._scroll = $("#sheet-body").scrollTop; shStack.push(sh); } else shStack.length = 0;
     sh = data;
-    if ($("#sheet").hidden || $("#sheet").classList.contains("a-out")) showOver($("#sheet"));
+    if (!open) showOver($("#sheet")); else replay($("#sheet-body"), "a-sw");
     $("#sheet-body").scrollTop = 0;
     renderSheet();
   }
+  /** Geri: önceki sayfa varsa ona dön, yoksa kapat. */
   function closeSheet() {
+    spinner($("#sheet-spin"), false);
+    if (shStack.length) {
+      sh = shStack.pop();
+      replay($("#sheet-body"), "a-sw");
+      renderSheet();
+      $("#sheet-body").scrollTop = sh._scroll || 0;
+      return;
+    }
     hideOver($("#sheet"));
     sh = null;
-    spinner($("#sheet-spin"), false);
+  }
+  /** Alt menü vb.: tüm sayfa geçmişiyle birlikte kapat. */
+  function closeSheetAll() {
+    shStack.length = 0;
+    if (!$("#sheet").hidden) { hideOver($("#sheet")); sh = null; spinner($("#sheet-spin"), false); }
   }
   function renderSheet() {
     if (!sh) return;
@@ -1040,7 +1077,7 @@
     cur.suggBusy = true;
     const pool = cur.songs.slice();
     for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
-    suggest(pool, cur.songs.map((s) => s.id).concat((cur.sugg || []).map((s) => s.id)), 20).then((items) => {
+    suggest(pool, cur.songs.map((s) => s.id).concat((cur.sugg || []).map((s) => s.id)), 20, cur.songs.concat(cur.sugg || [])).then((items) => {
       cur.sugg = items;
       if (sh === cur) renderSheet();
     }).finally(() => { cur.suggBusy = false; });
@@ -1059,7 +1096,7 @@
   function reloadSheet() {
     if (sh && sh.kind === "pl") {
       const p = J(FM.playlist(sh.id), null);
-      if (!p) { closeSheet(); return; }
+      if (!p) { closeSheetAll(); return; }
       sh.name = p.name; sh.songs = p.songs; sh.coverV = p.coverV;
       renderSheet();
     } else if (sh && sh.kind !== "pl" && sh.songs) {
@@ -1205,7 +1242,7 @@
         } },
         { g: "▣", t: "Kapak resmi", fn: () => coverMenu(pid) },
         { g: "✎", t: "Yeniden adlandır", fn: () => ask("LİSTEYİ YENİDEN ADLANDIR", p.name, (name) => { FM.plRename(pid, name); reloadSheet(); renderLib(); }) },
-        { g: "✕", t: "Listeyi sil", danger: true, fn: () => confirmDo("“" + p.name + "” silinsin mi? Şarkılar kitaplıkta kalır.", () => { FM.plDelete(pid); if (sh && sh.id === pid) closeSheet(); renderLib(); toast("liste silindi"); }) },
+        { g: "✕", t: "Listeyi sil", danger: true, fn: () => confirmDo("“" + p.name + "” silinsin mi? Şarkılar kitaplıkta kalır.", () => { FM.plDelete(pid); if (sh && sh.id === pid) closeSheetAll(); renderLib(); toast("liste silindi"); }) },
       ],
     });
   }
@@ -1693,16 +1730,28 @@
   // --- öneriler ----------------------------------------------------------------------------------
 
   /** Birkaç tohum şarkının "benzer şarkılar"ını karıştırıp birleştir; zaten olanları çıkar. */
-  function suggest(seeds, exclude, max) {
+  /** Aynı şarkının farklı yüklemeleri için anahtar: ad + ilk sanatçı (parantezler, "official video" vb. hariç). */
+  function songKey(s) {
+    const n = (x) => norm(x).replace(/\(.*?\)|\[.*?\]/g, " ")
+      .replace(/\b(official|video|audio|lyrics?|music|hd|4k|klip|sozleri)\b/g, " ")
+      .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    return n(s.title) + "|" + n(String(s.artist || "").split(/,| & | ve | feat| ft\./i)[0]);
+  }
+  function suggest(seeds, exclude, max, avoid) {
     const ids = seeds.filter((s) => s && String(s.id || "").startsWith("yt:")).slice(0, 3);
     if (!ids.length) return Promise.resolve([]);
     return Promise.all(ids.map((s) => call("similar", s.id.slice(3)).then((d) => d.songs || []).catch(() => [])))
       .then((lists) => {
         const out = [], seen = new Set(exclude);
+        const keys = new Set((avoid || []).map(songKey));
         for (let i = 0; out.length < max && lists.some((l) => i < l.length); i++) {
           for (const l of lists) {
             const x = l[i];
-            if (x && !seen.has(x.id)) { seen.add(x.id); out.push(Object.assign({ kind: "song" }, x)); }
+            if (!x || seen.has(x.id)) continue;
+            const k = songKey(x);
+            if (keys.has(k)) continue;
+            seen.add(x.id); keys.add(k);
+            out.push(Object.assign({ kind: "song" }, x));
           }
         }
         return out.slice(0, max);

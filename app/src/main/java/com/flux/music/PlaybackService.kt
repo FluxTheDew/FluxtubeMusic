@@ -213,6 +213,27 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    @Volatile private var wantSkip = false
+
+    fun canSkipToSuggestion() = radioOn() && !player.hasNextMediaItem() && player.mediaItemCount > 0
+
+    /** Son şarkıdayken ⏭: önerilerden sıradakini sıraya koy ve çal. */
+    fun skipToSuggestion() {
+        if (pending.isNotEmpty()) { appendOne(true); return }
+        wantSkip = true
+        val a = anchor
+        if (a != null) fetch(a, replace = false) else refreshSuggestions()
+    }
+
+    /** Aynı şarkının farklı yüklemeleri (aynı ad + sanatçı) bir kez görünsün. */
+    private fun songKey(title: String, artist: String): String {
+        fun n(x: String) = x.lowercase()
+            .replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ")
+            .replace(Regex("(?i)\\b(official|video|audio|lyrics?|music|hd|4k|klip|sözleri)\\b"), " ")
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+        return n(title) + "|" + n(artist.split(",", "&", " ve ", " feat", " ft.").first())
+    }
+
     /** ↻: önerileri şimdi çalan şarkıya göre yenile. */
     fun refreshSuggestions() {
         val cur = player.currentMediaItem?.mediaId?.takeIf { it.startsWith("yt:") }
@@ -247,10 +268,20 @@ class PlaybackService : MediaSessionService() {
                 handler.post {
                     if (anchor != forAnchor) return@post // bu arada yeni şarkı başlatıldı
                     if (replace) pending.clear()
-                    val have = queueIds().toSet()
-                    pending.addAll(songs.filter { it.id !in have && pending.none { p -> p.id == it.id } })
+                    val ids = queueIds()
+                    val have = ids.toSet()
+                    // Sırada ve listede olanlarla aynı ad + sanatçı → kopya say.
+                    val keys = HashSet<String>()
+                    ids.forEach { id -> Library.get(id)?.let { keys.add(songKey(it.title, it.artist)) } }
+                    pending.forEach { keys.add(songKey(it.title, it.artist)) }
+                    for (sg in songs) {
+                        if (sg.id in have || pending.any { p -> p.id == sg.id }) continue
+                        if (!keys.add(songKey(sg.title, sg.artist))) continue
+                        pending.add(sg)
+                    }
                     publish()
-                    if (player.playbackState == Player.STATE_ENDED && radioOn() && !player.hasNextMediaItem()) appendOne(true)
+                    if (wantSkip) { wantSkip = false; if (pending.isNotEmpty()) appendOne(true) }
+                    else if (player.playbackState == Player.STATE_ENDED && radioOn() && !player.hasNextMediaItem()) appendOne(true)
                 }
             } catch (e: Exception) {
                 Logbook.add("ERR", "öneri alınamadı: ${e.message}")

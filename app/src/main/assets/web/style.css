@@ -644,7 +644,9 @@ input[type="range"].seek::-webkit-slider-thumb { width: 0.85rem; height: 0.85rem
 .sheet-hero .btn { margin-top: 0.6rem; padding: 0.45rem 0.6rem; }
 
 /* Sola-sağa kaydır → sıradaki: satırın altında kırmızı ipucu */
-.list .row, .hs-rows .row { touch-action: pan-y; }
+.list .row { touch-action: pan-y; }
+/* Ana sayfadaki yatay raflar (cover, remiks…) parmakla sağa-sola kaysın. */
+.hscroll, .hscroll .row, .hscroll .tile, .hscroll .card { touch-action: auto; }
 .row.is-swiping { transition: none; z-index: 2; }
 .row.swipe-back { transition: transform 0.18s ease-out; }
 .swipe-hint { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 1rem; font: 700 0.78rem/1 var(--mono); letter-spacing: 0.1em; color: var(--red); background: var(--red-soft); pointer-events: none; z-index: 0; width: 100%; }
@@ -730,3 +732,15 @@ input[type="range"].seek::-webkit-slider-thumb { width: 0.85rem; height: 0.85rem
 .sugg-head .sec { flex: 1; padding: 0; }
 .sugg-head .btn { padding: 0.35rem 0.6rem; }
 #qs-list .row .add, .sugg .row .add { border-color: var(--red-line); color: var(--red); }
+
+/* Maskot (GIF): her ekranda bir kez — üst çubukta ya da açık sayfanın başlığında. */
+.mascot { width: 1.7em; height: 1.7em; image-rendering: pixelated; vertical-align: middle; margin: -0.4em 0.45em -0.3em; flex: none; }
+.brand .mascot { width: 2rem; height: 2rem; margin: -0.5rem 0.5rem -0.45rem; }
+.over-head h3 .mascot { margin-left: 0; }
+.over-head h3:has(.mascot)::before { content: none; }
+.over-head > .mascot, .sheet-head > .mascot { width: 1.9rem; height: 1.9rem; margin: 0; }
+.sheet-head h3::before, #settings .over-head h3::before { content: none; }
+
+/* Çalan şarkının sanatçısı: dokun → sanatçı sayfası */
+.np-artist.is-link { cursor: pointer; text-decoration: underline; text-decoration-color: var(--red-line); text-underline-offset: 0.25em; }
+.np-artist.is-link:active { color: var(--red); }

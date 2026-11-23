@@ -519,7 +519,12 @@ class MainActivity : Activity() {
         @JavascriptInterface fun play() = withPlayer { it.ensurePlaying() }
         @JavascriptInterface fun pause() = withPlayer { it.pause() }
         @JavascriptInterface fun toggle() = withPlayer { if (it.playWhenReady && it.playbackState != Player.STATE_ENDED) it.pause() else it.ensurePlaying() }
-        @JavascriptInterface fun next() = withPlayer { it.seekToNext(); it.ensurePlaying() }
+        @JavascriptInterface fun next() = withPlayer {
+            // Son şarkıdayken öneriler açıksa: önerilerden sıradakine geç.
+            val svc = PlaybackService.instance
+            if (!it.hasNextMediaItem() && svc != null && svc.canSkipToSuggestion()) svc.skipToSuggestion()
+            else { it.seekToNext(); it.ensurePlaying() }
+        }
         @JavascriptInterface fun prev() = withPlayer { it.seekToPrevious() }
         @JavascriptInterface fun seek(ms: Double) = withPlayer { it.seekTo(ms.toLong()) }
         @JavascriptInterface fun jump(index: Int) = withPlayer {
