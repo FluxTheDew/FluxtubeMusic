@@ -669,6 +669,8 @@ class MainActivity : Activity() {
         /** Sıranın altındaki ÖNERİLEN: çalma servisinin listesi (sıraya girenler buradan). */
         @JavascriptInterface fun suggestions(): String = PlaybackService.suggestJson
         @JavascriptInterface fun refreshSuggestions() = main.post { PlaybackService.instance?.refreshSuggestions() }
+        @JavascriptInterface fun suggestChips(): String = PlaybackService.chipsJson
+        @JavascriptInterface fun setSuggestChip(i: Int) = main.post { PlaybackService.instance?.setChip(i) }
         @JavascriptInterface fun artist(req: Int, id: String) = async(req) { YtAccount.artist(id) }
 
         /** Liste kapağı: galeriden resim seç / kaldır. */

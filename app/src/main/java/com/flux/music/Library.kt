@@ -60,6 +60,7 @@ data class Song(
         .put("dur", durationSec)
         .put("thumb", thumb)
         .put("dl", offline)
+        .put("av", thumb.hashCode())
         .put("local", isLocal)
         .put("liked", liked)
         .put("addedAt", addedAt)
@@ -140,7 +141,12 @@ object Library {
         try {
             val o = JSONObject(store.readText())
             o.optJSONArray("songs")?.let { a ->
-                for (i in 0 until a.length()) Song.fromJson(a.getJSONObject(i)).let { songs[it.id] = it }
+                for (i in 0 until a.length()) Song.fromJson(a.getJSONObject(i)).let { s0 ->
+                    // Eski sürümler 4:3 şeritli küçük resim saklıyordu: düzelt, önbelleği at.
+                    val fixed = Yt.fixThumb(s0.thumb)
+                    val s = if (fixed != s0.thumb) { artFile(s0.id).delete(); s0.copy(thumb = fixed) } else s0
+                    songs[s.id] = s
+                }
             }
             o.optJSONArray("playlists")?.let { a ->
                 for (i in 0 until a.length()) Playlist.fromJson(a.getJSONObject(i)).let { lists[it.id] = it }
@@ -176,34 +182,27 @@ object Library {
      * Arayüzden/aramadan gelen şarkıyı kaydet. Var olanın indirme, beğeni ve
      * eklenme bilgisi korunur; sadece başlık/kapak tazelenir.
      */
-    fun upsert(s: Song): Song {
-        val out = synchronized(this) {
-            val old = songs[s.id]
-            val merged = if (old == null) s else old.copy(
-                title = s.title.ifBlank { old.title },
-                artist = s.artist.ifBlank { old.artist },
-                durationSec = if (s.durationSec > 0) s.durationSec else old.durationSec,
-                thumb = s.thumb.ifBlank { old.thumb },
-                file = old.file ?: s.file,
-            )
-            songs[s.id] = merged
-            merged
-        }
-        changed()
-        return out
+    fun upsert(s: Song): Song = upsertAll(listOf(s)).first()
+
+    /** Eskiyle birleştir; daha iyi kapak geldiyse önbellekteki eski kapağı sil. */
+    private fun merge(old: Song?, s0: Song): Song {
+        val s = s0.copy(thumb = Yt.fixThumb(s0.thumb))
+        if (old == null) return s
+        val thumb = Yt.betterThumb(old.thumb, s.thumb)
+        if (thumb != old.thumb) artFile(old.id).delete()
+        return old.copy(
+            title = s.title.ifBlank { old.title },
+            artist = s.artist.ifBlank { old.artist },
+            durationSec = if (s.durationSec > 0) s.durationSec else old.durationSec,
+            thumb = thumb,
+            file = old.file ?: s.file,
+        )
     }
 
     fun upsertAll(list: List<Song>): List<Song> {
         val out = synchronized(this) {
             list.map { s ->
-                val old = songs[s.id]
-                val merged = if (old == null) s else old.copy(
-                    title = s.title.ifBlank { old.title },
-                    artist = s.artist.ifBlank { old.artist },
-                    durationSec = if (s.durationSec > 0) s.durationSec else old.durationSec,
-                    thumb = s.thumb.ifBlank { old.thumb },
-                    file = old.file ?: s.file,
-                )
+                val merged = merge(songs[s.id], s)
                 songs[s.id] = merged
                 merged
             }

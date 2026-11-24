@@ -232,6 +232,41 @@ object YtAccount {
     /** Radyo / karışık (RD…): "sıradaki" panelindeki şarkılar. */
     private fun radio(id: String): Pair<String?, List<Song>> {
         val r = post("next", JSONObject().put("playlistId", id).put("isAudioOnly", true).put("enablePersistentPlaylistPanel", true))
+        return text(first(r, "playlistPanelRenderer")?.optJSONObject("title")).ifBlank { null } to panelSongs(r)
+    }
+
+    /**
+     * Bir şarkının radyosu + YT Music'in "sıradaki" panelindeki düğmeler (Hepsi, Tanıdık,
+     * Keşfet, Sakin… en sonda dil). chip verilirse o düğmenin listesi.
+     * Dönüş: {songs:[…], chips:[{title, pl, params, vid, sel}]}
+     */
+    fun radioPanel(videoId: String, chip: JSONObject? = null): JSONObject {
+        val body = JSONObject().put("isAudioOnly", true).put("enablePersistentPlaylistPanel", true)
+        if (chip != null) {
+            body.put("videoId", chip.optString("vid").ifEmpty { videoId })
+            body.put("playlistId", chip.optString("pl").ifEmpty { "RDAMVM$videoId" })
+            chip.optString("params").takeIf { it.isNotEmpty() }?.let { body.put("params", it) }
+        } else {
+            body.put("videoId", videoId).put("playlistId", "RDAMVM$videoId")
+        }
+        val r = post("next", body)
+        val chips = JSONArray()
+        for (c in all(r, "chipCloudChipRenderer")) {
+            val title = text(c.optJSONObject("text"))
+            if (title.isBlank()) continue
+            val we = first(c.optJSONObject("navigationEndpoint"), "watchEndpoint") ?: continue
+            chips.put(
+                JSONObject().put("title", title)
+                    .put("pl", we.optString("playlistId")).put("params", we.optString("params"))
+                    .put("vid", we.optString("videoId")).put("sel", c.optBoolean("isSelected"))
+            )
+        }
+        val songs = JSONArray()
+        panelSongs(r).forEach { songs.put(it.uiJson()) }
+        return JSONObject().put("songs", songs).put("chips", chips)
+    }
+
+    private fun panelSongs(r: JSONObject): List<Song> {
         val out = LinkedHashMap<String, Song>()
         for (v in all(r, "playlistPanelVideoRenderer")) {
             val vid = v.optString("videoId").ifEmpty { null } ?: continue
@@ -241,11 +276,10 @@ object YtAccount {
                 title = text(v.optJSONObject("title")).ifBlank { "?" },
                 artist = by.split(" • ").first().trim(),
                 durationSec = parseDur(text(v.optJSONObject("lengthText"))),
-                thumb = lastThumb(v.optJSONObject("thumbnail")).ifEmpty { "https://i.ytimg.com/vi/$vid/hqdefault.jpg" },
+                thumb = lastThumb(v.optJSONObject("thumbnail")).ifEmpty { Yt.videoThumb(vid) },
             ))
         }
-        val name = text(first(r, "playlistPanelRenderer")?.optJSONObject("title")).ifBlank { null }
-        return name to out.values.toList()
+        return out.values.toList()
     }
 
     /** Ana sayfadan / aramadan gelen bir listeyi aç: {name, songs}. */
@@ -372,7 +406,7 @@ object YtAccount {
             return Song(
                 id = "yt:$vid", title = title,
                 artist = (if (parts.size > 1) parts[1] else parts.firstOrNull() ?: "").removeSuffix(" - Topic"),
-                durationSec = 0, thumb = thumb.ifEmpty { "https://i.ytimg.com/vi/$vid/hqdefault.jpg" },
+                durationSec = 0, thumb = thumb.ifEmpty { Yt.videoThumb(vid) },
             ).uiJson().put("kind", "song")
         }
         val bid = nav?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
@@ -401,7 +435,7 @@ object YtAccount {
             title = text(col(0)).ifBlank { "?" },
             artist = text(col(1)).split(" • ").first().removeSuffix(" - Topic").trim(),
             durationSec = parseDur(dur),
-            thumb = lastThumb(r.optJSONObject("thumbnail")).ifEmpty { "https://i.ytimg.com/vi/$vid/hqdefault.jpg" },
+            thumb = lastThumb(r.optJSONObject("thumbnail")).ifEmpty { Yt.videoThumb(vid) },
         )
     }
 

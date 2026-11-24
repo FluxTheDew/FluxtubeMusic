@@ -112,7 +112,7 @@ object Yt {
             title = item.name ?: "?",
             artist = cleanArtist(item.uploaderName ?: ""),
             durationSec = item.duration.coerceAtLeast(0),
-            thumb = bestThumb(item.thumbnails).ifEmpty { "https://i.ytimg.com/vi/$id/hqdefault.jpg" },
+            thumb = bestThumb(item.thumbnails).ifEmpty { videoThumb(id) },
         )
     }
 
@@ -133,7 +133,7 @@ object Yt {
             title = info.name ?: "?",
             artist = cleanArtist(info.uploaderName ?: ""),
             durationSec = info.duration,
-            thumb = bestThumb(info.thumbnails).ifEmpty { "https://i.ytimg.com/vi/$id/hqdefault.jpg" },
+            thumb = bestThumb(info.thumbnails).ifEmpty { videoThumb(id) },
         )
         return JSONObject().put("name", s.title).put("songs", JSONArray().put(s.uiJson()))
     }
@@ -173,5 +173,27 @@ object Yt {
     fun upscale(u: String): String =
         if (u.contains("googleusercontent.com") || u.contains("ggpht.com"))
             u.replace(Regex("=w\\d+-h\\d+[^&]*$"), "=w544-h544-l90-rj")
-        else u
+        else fixThumb(u)
+
+    /** Kare albüm kapağı mı (YT Music'teki gibi)? */
+    fun isSquare(u: String) = u.contains("googleusercontent.com") || u.contains("ggpht.com")
+
+    /**
+     * Video küçük resimleri: hqdefault / sddefault 4:3 ve üstte-altta siyah şeritli;
+     * kareye kırpınca bozuk görünüyor. Şeritsiz 16:9 mqdefault kullan (YT Music de böyle kırpıyor).
+     */
+    fun fixThumb(u: String): String {
+        val m = Regex("i\\.ytimg\\.com/vi(?:_webp)?/([\\w-]{11})/(?:hq|sd|)default\\.(?:jpg|webp)").find(u) ?: return u
+        return "https://i.ytimg.com/vi/${m.groupValues[1]}/mqdefault.jpg"
+    }
+
+    fun videoThumb(id: String) = "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+
+    /** Eski ile yeni kapaktan iyisi: kare albüm kapağı video küçük resminden üstün. */
+    fun betterThumb(old: String, new: String): String = when {
+        new.isBlank() -> old
+        old.isBlank() -> new
+        isSquare(old) && !isSquare(new) -> old
+        else -> new
+    }
 }

@@ -744,3 +744,8 @@ input[type="range"].seek::-webkit-slider-thumb { width: 0.85rem; height: 0.85rem
 /* Çalan şarkının sanatçısı: dokun → sanatçı sayfası */
 .np-artist.is-link { cursor: pointer; text-decoration: underline; text-decoration-color: var(--red-line); text-underline-offset: 0.25em; }
 .np-artist.is-link:active { color: var(--red); }
+
+/* Öneriler: tür / dil düğmeleri */
+.qs-chips { padding: 0 0 0.7rem; margin: 0 !important; }
+.qs-chips:empty { display: none; }
+.qs-chips button[aria-pressed="true"] { background: var(--accent); color: #000; border-color: var(--accent); }

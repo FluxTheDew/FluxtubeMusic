@@ -171,49 +171,80 @@ class PlaybackService : MediaSessionService() {
 
     // --- öneriler: tek liste (ekrandaki ÖNERİLEN ile sıraya girenler aynı) -------------------
 
-    /** Henüz sıraya girmemiş öneriler. Kendiliğinden yenilenmez. */
+    /** Henüz sıraya girmemiş öneriler. */
     private val pending = ArrayList<Song>()
-    /** Önerilerin dayandığı şarkı: sıranın ilk YouTube şarkısı (yeni şarkı başlatınca değişir). */
+    /** Sıranın ilk YouTube şarkısı: değişince (yeni şarkı / liste başlatıldı) öneriler baştan. */
     private var anchor: String? = null
+    /** Son bakılan sıra: kullanıcının kendi eklediği şarkıları bulmak için. */
+    private var lastIds: List<String> = emptyList()
+    /** Öneriden sıraya girenler (bunlar önerileri tazelemez). */
+    private val fromSuggest = HashSet<String>()
+    /** Bu oturumda gösterilmiş öneriler: ↻ hep aynılarını getirmesin. */
+    private val shown = HashSet<String>()
+    /** YT Music'in tür / dil düğmeleri ve seçili olan (-1: hepsi). */
+    private var chips = JSONArray()
+    private var chipSel = -1
     @Volatile private var suggestBusy = false
+    @Volatile private var wantSkip = false
 
     private fun suggestOn() = Prefs.get("radio") == "true"
     private fun radioOn() = suggestOn() && player.repeatMode == Player.REPEAT_MODE_OFF
     private fun queueIds() = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
 
-    /** Arayüz için: bekleyen öneriler. */
+    /** Arayüz için: bekleyen öneriler + düğmeler. */
     private fun publish() {
         val arr = JSONArray()
         pending.forEach { arr.put(it.uiJson().put("kind", "song")) }
         suggestJson = arr.toString()
+        chipsJson = JSONObject().put("chips", chips).put("sel", chipSel).toString()
         suggestRev++
     }
 
     /**
-     * Sıra değişince: yeni şarkı başlatıldıysa (sıranın ilk şarkısı değiştiyse) öneriler
-     * o şarkıya göre baştan; değilse aynı liste kalır, sadece sıraya girmiş olanlar düşer.
+     * Sıra değişince:
+     * - ilk şarkı değiştiyse (yeni şarkı / liste başlatıldı) öneriler o şarkıya göre baştan;
+     * - kullanıcı kendisi şarkı eklediyse eklenenlere göre tazelenir;
+     * - öneriden eklenenler tazelemez, sadece listeden düşer.
      * Öneriler açık, tekrar kapalı ve son şarkıdaysak sıra bitince sıradaki öneri girer.
      */
     private fun continueWithSuggestions() {
         if (!suggestOn()) return
         val ids = queueIds()
+        val prev = lastIds.toSet()
+        lastIds = ids
         val first = ids.firstOrNull { it.startsWith("yt:") }
         if (first != anchor) {
             anchor = first
-            pending.clear()
+            pending.clear(); shown.clear(); fromSuggest.clear()
+            chips = JSONArray(); chipSel = -1
             publish()
-            if (first != null) fetch(first, replace = true)
+            if (first != null) fetch(listOf(first), replace = true)
             return
         }
+        val pendingIds = pending.map { it.id }.toSet()
+        val added = ids.filter { it !in prev }
+        added.filter { it in pendingIds }.forEach { fromSuggest.add(it) }
+        val userAdded = added.filter { it.startsWith("yt:") && it !in pendingIds && it !in fromSuggest }
         val have = ids.toSet()
         if (pending.removeAll { it.id in have }) publish()
+        if (userAdded.isNotEmpty() && prev.isNotEmpty()) {
+            // Kendi eklediğin şarkılar: önerileri onlara (ve çalana) göre tazele.
+            val cur = player.currentMediaItem?.mediaId?.takeIf { it.startsWith("yt:") }
+            fetch((userAdded.takeLast(2) + listOfNotNull(cur)).distinct(), replace = true)
+            return
+        }
         if (!radioOn() || ids.isEmpty() || player.hasNextMediaItem()) return
         if (player.playbackState == Player.STATE_ENDED) {
-            if (pending.isNotEmpty()) appendOne(true) else anchor?.let { fetch(it, replace = false) }
+            if (pending.isNotEmpty()) appendOne(true) else fetch(seeds(), replace = false)
         }
     }
 
-    @Volatile private var wantSkip = false
+    /** Öneri tohumu: çalan şarkı + sıradan rastgele birkaç YouTube şarkısı. */
+    private fun seeds(): List<String> {
+        val yt = queueIds().filter { it.startsWith("yt:") }
+        val cur = player.currentMediaItem?.mediaId?.takeIf { it.startsWith("yt:") }
+        return (listOfNotNull(cur) + yt.shuffled()).distinct().take(3)
+    }
 
     fun canSkipToSuggestion() = radioOn() && !player.hasNextMediaItem() && player.mediaItemCount > 0
 
@@ -221,8 +252,24 @@ class PlaybackService : MediaSessionService() {
     fun skipToSuggestion() {
         if (pending.isNotEmpty()) { appendOne(true); return }
         wantSkip = true
-        val a = anchor
-        if (a != null) fetch(a, replace = false) else refreshSuggestions()
+        fetch(seeds(), replace = false)
+    }
+
+    /** ↻: farklı tohumlarla yeni öneriler (gösterilmişleri atlayarak). */
+    fun refreshSuggestions() {
+        if (anchor == null) anchor = queueIds().firstOrNull { it.startsWith("yt:") }
+        pending.forEach { shown.add(it.id) }
+        pending.clear()
+        publish()
+        fetch(seeds(), replace = true)
+    }
+
+    /** Tür / dil düğmesi (-1: hepsi). */
+    fun setChip(i: Int) {
+        chipSel = if (i in 0 until chips.length()) i else -1
+        pending.clear()
+        publish()
+        fetch(seeds(), replace = true)
     }
 
     /** Aynı şarkının farklı yüklemeleri (aynı ad + sanatçı) bir kez görünsün. */
@@ -234,47 +281,57 @@ class PlaybackService : MediaSessionService() {
         return n(title) + "|" + n(artist.split(",", "&", " ve ", " feat", " ft.").first())
     }
 
-    /** ↻: önerileri şimdi çalan şarkıya göre yenile. */
-    fun refreshSuggestions() {
-        val cur = player.currentMediaItem?.mediaId?.takeIf { it.startsWith("yt:") }
-            ?: queueIds().firstOrNull { it.startsWith("yt:") } ?: return
-        anchor = queueIds().firstOrNull { it.startsWith("yt:") }
-        pending.clear()
-        publish()
-        fetch(cur, replace = true)
-    }
+    private fun toSong(o: JSONObject) = Song(
+        id = o.getString("id"),
+        title = o.optString("title", "?"),
+        artist = o.optString("artist", ""),
+        durationSec = o.optLong("dur", 0),
+        thumb = o.optString("thumb", ""),
+    )
 
-    /** seed'e benzer şarkıları çek. replace=false: liste bittiyse sonuna yenilerini ekle. */
-    private fun fetch(seed: String, replace: Boolean) {
-        if (suggestBusy || !Net.online(this)) return
+    /**
+     * Öneri çek. Tür/dil düğmesi seçiliyse o düğmenin listesi; değilse tohum şarkıların
+     * radyoları karıştırılarak. replace=false: liste bittiyse sonuna ekle.
+     */
+    private fun fetch(seedIds: List<String>, replace: Boolean) {
+        if (suggestBusy || !Net.online(this) || seedIds.isEmpty()) return
         suggestBusy = true
-        val exclude = queueIds().toSet() + pending.map { it.id }
+        val exclude = queueIds().toSet() + pending.map { it.id } + shown
         val forAnchor = anchor
+        val chip = if (chipSel >= 0) chips.optJSONObject(chipSel) else null
         Thread {
             try {
-                val arr = YtAccount.similar(seed.removePrefix("yt:")).optJSONArray("songs") ?: JSONArray()
-                val songs = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
-                    .filter { it.optString("id").startsWith("yt:") && it.optString("id") !in exclude && it.optString("id") != seed }
-                    .take(25)
-                    .map {
-                        Song(
-                            id = it.getString("id"),
-                            title = it.optString("title", "?"),
-                            artist = it.optString("artist", ""),
-                            durationSec = it.optLong("dur", 0),
-                            thumb = it.optString("thumb", ""),
-                        )
-                    }
+                var newChips: JSONArray? = null
+                val lists = if (chip != null) {
+                    listOf(YtAccount.radioPanel(seedIds.first().removePrefix("yt:"), chip).optJSONArray("songs") ?: JSONArray())
+                } else seedIds.mapIndexedNotNull { i, sid ->
+                    runCatching {
+                        val r = YtAccount.radioPanel(sid.removePrefix("yt:"))
+                        if (i == 0) newChips = r.optJSONArray("chips")
+                        r.optJSONArray("songs") ?: JSONArray()
+                    }.getOrNull()
+                }
+                // Tohumların radyolarını sırayla karıştır: biri baskın olmasın.
+                val merged = ArrayList<Song>()
+                val seen = HashSet<String>()
+                val max = lists.maxOfOrNull { it.length() } ?: 0
+                for (k in 0 until max) for (l in lists) {
+                    val o = l.optJSONObject(k) ?: continue
+                    val id = o.optString("id")
+                    if (!id.startsWith("yt:") || id in exclude || id in seedIds || !seen.add(id)) continue
+                    merged.add(toSong(o))
+                }
                 handler.post {
                     if (anchor != forAnchor) return@post // bu arada yeni şarkı başlatıldı
+                    newChips?.let { c -> if (c.length() > 0 && chipSel < 0) chips = c }
                     if (replace) pending.clear()
                     val ids = queueIds()
                     val have = ids.toSet()
-                    // Sırada ve listede olanlarla aynı ad + sanatçı → kopya say.
                     val keys = HashSet<String>()
                     ids.forEach { id -> Library.get(id)?.let { keys.add(songKey(it.title, it.artist)) } }
                     pending.forEach { keys.add(songKey(it.title, it.artist)) }
-                    for (sg in songs) {
+                    for (sg in merged) {
+                        if (pending.size >= 30) break
                         if (sg.id in have || pending.any { p -> p.id == sg.id }) continue
                         if (!keys.add(songKey(sg.title, sg.artist))) continue
                         pending.add(sg)
@@ -297,6 +354,8 @@ class PlaybackService : MediaSessionService() {
         pending.removeAll { it.id in have }
         val next = pending.removeFirstOrNull() ?: run { publish(); return }
         publish()
+        fromSuggest.add(next.id)
+        shown.add(next.id)
         val saved = Library.upsert(next)
         player.addMediaItem(Library.mediaItem(saved))
         if (startNow) {
@@ -314,8 +373,7 @@ class PlaybackService : MediaSessionService() {
             val dur = player.duration
             if (dur <= 0 || dur == C.TIME_UNSET) return
             if (dur - player.currentPosition > 8000) return
-            if (pending.isNotEmpty()) appendOne(false)
-            else anchor?.let { fetch(it, replace = false) } // liste bitti: aynı şarkıya göre devamı
+            if (pending.isNotEmpty()) appendOne(false) else fetch(seeds(), replace = false)
         }
     }
 
@@ -386,6 +444,7 @@ class PlaybackService : MediaSessionService() {
     companion object {
         /** Arayüzün okuduğu öneri listesi (JSON) ve sürümü. */
         @Volatile var suggestJson = "[]"
+        @Volatile var chipsJson = "{\"chips\":[],\"sel\":-1}"
         @Volatile var suggestRev = 0L
         @Volatile var instance: PlaybackService? = null
     }

@@ -75,7 +75,7 @@
    */
   function artHtml(song, remote) {
     let src = "";
-    if (song) src = remote ? (song.thumb || "") : "https://fm.art/" + encodeURIComponent(song.id);
+    if (song) src = remote ? (song.thumb || "") : "https://fm.art/" + encodeURIComponent(song.id) + (song.av ? "?v=" + song.av : "");
     return '<div class="art">' + (src ? '<img loading="lazy" src="' + esc(src) + '" onerror="this.remove()" alt="">' : "") + "</div>";
   }
 
@@ -325,6 +325,14 @@
   function tapSong(song, ctx) {
     // Ana sayfa ve aramada: sıra tamamen o şarkı olur (öneriler açıksa arkası kendiliğinden gelir).
     if (ctx && (ctx.kind === "home" || ctx.kind === "search")) { enqueue([song], "replace"); return; }
+    // Sıra hâlâ bu listeyse (sırası değişmemiş): sırada o şarkıya geç.
+    const list = ctx && (ctx.list || ctx.items);
+    if (list && list.length && queue.length === list.length && ctx.k >= 0 && ctx.k < list.length &&
+        list[ctx.k] && list[ctx.k].id === song.id && queue.every((q, i) => q.id === (list[i] || {}).id)) {
+      FM.jump(ctx.k);
+      setTimeout(poll, 100);
+      return;
+    }
     enqueue([song], prefs.tap || "now");
   }
 
@@ -764,7 +772,7 @@
     let src = "";
     if (it.kind === "pl") src = coverUrl(it);
     else if (it.kind === "list") src = it.thumb || "";
-    else src = it.known ? "https://fm.art/" + encodeURIComponent(it.id) : (it.thumb || "");
+    else src = it.known ? "https://fm.art/" + encodeURIComponent(it.id) + (it.av ? "?v=" + it.av : "") : (it.thumb || "");
     return '<div class="art">' + (src ? '<img loading="lazy" src="' + esc(src) + '" onerror="this.remove()" alt="">' : "") + "</div>";
   }
 
@@ -1161,7 +1169,7 @@
 
   $("#sheet-back").addEventListener("click", closeSheet);
   bindSongList($("#sheet-list"), () => (sh ? sh.songs.concat(sh.lists || [], sh.sugg || []) : []), () => (sh ? {
-    kind: sh.kind, pid: sh.id,
+    kind: sh.kind, pid: sh.id, list: sh.songs,
     onAdd: (it) => {
       // Öneriden ＋ → bu listeye ekle; listedeki şarkıda ＋ → sıraya.
       if (sh.kind === "pl" && sh.sugg && sh.sugg.includes(it)) {
@@ -1767,9 +1775,34 @@
     if (!on || S.srev === qs.rev) return;
     qs.rev = S.srev;
     qs.items = J(FM.suggestions(), []);
+    const c = J(FM.suggestChips ? FM.suggestChips() : "{}", {});
+    qs.chips = c.chips || [];
+    qs.sel = c.sel == null ? -1 : c.sel;
     renderQs();
   }
+  function renderQsChips() {
+    const el = $("#qs-chips");
+    if (!qs.chips || !qs.chips.length) { el.innerHTML = ""; return; }
+    // YouTube'un ilk düğmesi genelde "Hepsi"; seçili değilse o basılı görünsün.
+    el.innerHTML = qs.chips.map((c, i) =>
+      '<button type="button" data-chip-i="' + i + '" aria-pressed="' + (qs.sel === i || (qs.sel < 0 && i === 0 && c.sel)) + '">' + esc(c.title) + "</button>").join("");
+  }
+  $("#qs-chips").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-chip-i]");
+    if (!b) return;
+    if (!S.online) { toast("internet yok", true); return; }
+    const i = Number(b.dataset.chipI);
+    const sel = qs.sel === i || (i === 0 && qs.chips[0] && qs.chips[0].sel && qs.sel < 0) ? -1 : i;
+    qs.sel = sel;
+    qs.items = [];
+    renderQs();
+    spinner($("#qs-spin"), true);
+    setTimeout(() => spinner($("#qs-spin"), false), 2500);
+    FM.setSuggestChip(sel);
+  });
+
   function renderQs() {
+    renderQsChips();
     const have = new Set(queue.map((q) => q.id));
     qs.items = qs.items.filter((x) => !have.has(x.id));
     $("#qs-list").innerHTML = qs.items.length ? qs.items.map((s, k) => songRow(s, k, { remote: !s.dl })).join("")
@@ -1881,7 +1914,13 @@
       prev: () => { st.index = Math.max(0, st.index - 1); st.pos = 0; },
       seek: (ms) => { st.pos = ms; }, jump: (i) => { st.index = i; st.pos = 0; },
       repeat: () => { st.repeat = { 0: 2, 2: 1, 1: 0 }[st.repeat]; },
-      enqueue: (json, mode) => { const a = JSON.parse(json).map((s) => s.id); if (mode === "end") q.push(...a); else q.splice(st.index + 1, 0, ...a); qr++; return a.length; },
+      enqueue: (json, mode, start) => {
+        const a = JSON.parse(json).map((s) => s.id);
+        if (mode === "end") q.push(...a);
+        else if (mode === "replace" || mode === "shuffle") { q.length = 0; q.push(...a); st.index = start || 0; }
+        else q.splice(st.index + 1, 0, ...a);
+        qr++; return a.length;
+      },
       move: (f, t) => { q.splice(t, 0, q.splice(f, 1)[0]); qr++; },
       remove: (i) => { q.splice(i, 1); qr++; }, clearUpcoming: () => { q.length = st.index + 1; qr++; }, clearQueue: () => { q.length = 0; qr++; },
       shuffleUpcoming: () => { qr++; }, saveQueue: () => "p2",
@@ -1909,6 +1948,8 @@
       jsError: () => {},
       suggestions: () => JSON.stringify(songs.slice(8, 12).map((x) => Object.assign({ kind: "song" }, x))),
       refreshSuggestions: () => {},
+      suggestChips: () => JSON.stringify({ chips: [{ title: "Hepsi", sel: true }, { title: "Tanıdık" }, { title: "Keşfet" }, { title: "Sakin" }, { title: "Türkçe" }], sel: -1 }),
+      setSuggestChip: () => {},
       similar: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "mix", songs: songs.slice(8, 12) } })), 300),
       boot: () => {}, touch: () => {}, pickCover: () => {}, removeCover: () => {},
       artist: (req) => setTimeout(() => window.FMcb(req, JSON.stringify({ ok: true, data: { name: "TV Girl", thumb: "", all: "OLAK1", songs: songs.slice(0, 5), lists: [{ kind: "list", list: "OLAK2", title: "French Exit", artist: "Albüm · 2014", thumb: "" }] } })), 400),

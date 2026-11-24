@@ -182,7 +182,10 @@ object Downloads {
     fun saveArt(s: Song) {
         val f = Library.artFile(s.id)
         if (f.exists() && f.length() > 0) return
-        val urls = listOf(s.thumb, "https://i.ytimg.com/vi/${s.videoId}/hqdefault.jpg").filter { it.isNotEmpty() }
+        // Kare albüm kapağı; yoksa büyük 16:9 (hq720), o da yoksa mqdefault.
+        val urls = (if (Yt.isSquare(s.thumb)) listOf(s.thumb) else emptyList()) +
+            listOf("https://i.ytimg.com/vi/${s.videoId}/hq720.jpg", Yt.fixThumb(s.thumb), Yt.videoThumb(s.videoId))
+                .filter { it.isNotEmpty() }.distinct()
         for (u in urls) try {
             Net.client.newCall(okhttp3.Request.Builder().url(u).header("User-Agent", Net.UA).build()).execute().use { r ->
                 if (!r.isSuccessful) return@use
